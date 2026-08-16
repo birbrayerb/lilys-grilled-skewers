@@ -5,57 +5,112 @@ export const DH = 1480;
 export type Rect = { x: number; y: number; w: number; h: number };
 
 /** Wall/floor seam. The dining room sits behind it, the kitchen line in front. */
-export const FLOOR_Y = 420;
+export const FLOOR_Y = 404;
 
 /* ---------------------------------------------------------- dining room (back) */
 
-export const CARD: Rect = { x: 104, y: 104, w: 512, h: 204 };
-export const HEART_Y = 368;
-export const FAMILY_BASE = 500;
-export const TABLE: Rect = { x: 176, y: 484, w: 368, h: 48 };
+export const CARD: Rect = { x: 104, y: 86, w: 512, h: 230 };
+export const HEART_Y = 362;
+export const FAMILY_BASE = 496;
+export const TABLE: Rect = { x: 176, y: 472, w: 368, h: 42 };
+
+/** Lily now stands in the dining room — the kitchen line needs every unit it can get. */
+export const LILY_X = 660;
+export const LILY_BASE = 532;
 
 /* ------------------------------------------------------- kitchen line (front) */
 
-/** Four cook slots per station, sharing one column grid. */
+/** Four cook slots per cook station, laid out 2x2 so two stations fit side by side. */
 export const SLOTS = 4;
-export const slotX = (i: number): number => 90 + i * 144;
+/** The drink maker has one pour position per spout: 0 = lemonade, 1 = water. */
+export const DRINK_SLOTS = 2;
 
-export const GRILL: Rect = { x: 18, y: 560, w: 576, h: 260 };
-export const GRATE_Y0 = 604;
-export const GRILL_SLOT_Y = 636;
-export const GRILL_METER_Y = 580;
+const scol = (i: number): number => i % 2;
+const srow = (i: number): number => (i / 2) | 0;
 
-export const POT: Rect = { x: 18, y: 866, w: 576, h: 180 };
-export const POT_SLOT_Y = 904;
-export const POT_METER_Y = 856;
+/* row one — grill + pot */
+export const GRILL: Rect = { x: 14, y: 536, w: 344, h: 316 };
+export const POT: Rect = { x: 362, y: 536, w: 344, h: 316 };
 
-export const LILY_X = 656;
-export const LILY_BASE = 1080;
+export const GRATE_Y0 = 582;
+const COOK_ROW_Y = [634, 742];
+const COOK_METER_Y = [564, 690];
 
-export const FRIDGE: Rect = { x: 18, y: 1090, w: 684, h: 200 };
-export const doorRect = (d: number): Rect => ({ x: d === 0 ? 26 : 364, y: 1098, w: 330, h: 184 });
-/** Where an item is born when it leaves the fridge. */
-export const doorItem = (d: number): { x: number; y: number } => ({ x: d === 0 ? 191 : 529, y: 1170 });
+export const grillSlot = (i: number) => ({ x: GRILL.x + 92 + scol(i) * 160, y: COOK_ROW_Y[srow(i)] });
+export const potSlot = (i: number) => ({ x: POT.x + 92 + scol(i) * 160, y: COOK_ROW_Y[srow(i)] });
+export const cookMeterY = (i: number): number => COOK_METER_Y[srow(i)];
 
-export const TRAY: Rect = { x: 18, y: 1330, w: 684, h: 104 };
-export const TRAY_CAP = 8;
-export const trayX = (i: number): number => 60 + i * 84;
-export const TRAY_Y = 1380;
+/* row two — fryer + drink maker */
+export const FRYER: Rect = { x: 14, y: 866, w: 344, h: 262 };
+export const DRINKS: Rect = { x: 362, y: 866, w: 344, h: 262 };
+
+export const OIL_Y0 = 906;
+export const OIL_Y1 = 1092;
+const FRY_ROW_Y = [952, 1046];
+const FRY_METER_Y = [900, 998];
+
+export const fryerSlot = (i: number) => ({ x: FRYER.x + 92 + scol(i) * 160, y: FRY_ROW_Y[srow(i)] });
+export const fryMeterY = (i: number): number => FRY_METER_Y[srow(i)];
+
+export const DRINK_HEAD: Rect = { x: 362, y: 878, w: 344, h: 124 };
+export const drinkSlot = (i: number) => ({ x: DRINKS.x + 90 + i * 164, y: 1046 });
+export const drinkTap = (i: number) => ({ x: DRINKS.x + 90 + i * 164, y: 946 });
+
+/* ------------------------------------------------------------- tray + pantry */
+
+export const TRAY: Rect = { x: 14, y: 1146, w: 692, h: 96 };
+/** Twelve slots — matches the largest order the curve can ask for. */
+export const TRAY_CAP = 12;
+export const trayX = (i: number): number => 44 + i * 56;
+export const TRAY_Y = 1194;
+
+export const FRIDGE: Rect = { x: 14, y: 1252, w: 692, h: 214 };
+/** Six source buttons, 3 across x 2 down. */
+export const SOURCES = 6;
+export const srcRect = (i: number): Rect => ({
+  x: 22 + (i % 3) * 230,
+  y: 1262 + ((i / 3) | 0) * 98,
+  w: 214,
+  h: 86,
+});
+/** Where an item is born when it leaves the pantry. */
+export const srcItem = (i: number): { x: number; y: number } => {
+  const r = srcRect(i);
+  return { x: r.x + 45, y: r.y + r.h / 2 };
+};
 
 /* ----------------------------------------------------------------- tap zones */
 
 /** Generously padded — thumb-friendly, no precision required. */
 export const HIT = {
   /** Order card + happiness meter + the family themselves are all "feed them". */
-  family: { x: 56, y: 96, w: 608, h: 470 },
+  family: { x: 40, y: 76, w: 640, h: 452 },
 } satisfies Record<string, Rect>;
 
-/** Padded out to the unit edges so a sloppy thumb still lands on a door. */
-export const doorHit = (d: number): Rect => ({ x: d === 0 ? 18 : 360, y: 1086, w: 342, h: 208 });
+/** Padded out to the cell edges so a sloppy thumb still lands on a source. */
+export const srcHit = (i: number): Rect => ({
+  x: 14 + (i % 3) * 231,
+  y: 1252 + ((i / 3) | 0) * 100,
+  w: 231,
+  h: 100,
+});
 
-export const grillHit = (i: number): Rect => ({ x: slotX(i) - 70, y: 572, w: 140, h: 128 });
-export const potHit = (i: number): Rect => ({ x: slotX(i) - 70, y: 858, w: 140, h: 154 });
-export const trayHit = (i: number): Rect => ({ x: trayX(i) - 40, y: 1332, w: 80, h: 96 });
+export const grillHit = (i: number): Rect => {
+  const s = grillSlot(i);
+  return { x: s.x - 78, y: s.y - 56, w: 156, h: 110 };
+};
+export const potHit = (i: number): Rect => {
+  const s = potSlot(i);
+  return { x: s.x - 78, y: s.y - 56, w: 156, h: 110 };
+};
+export const fryerHit = (i: number): Rect => {
+  const s = fryerSlot(i);
+  return { x: s.x - 78, y: s.y - 48, w: 156, h: 96 };
+};
+/** Each spout owns half the drink maker, top to bottom — a huge, forgiving target. */
+export const drinkHit = (i: number): Rect => ({ x: DRINKS.x + i * 172, y: 878, w: 172, h: 240 });
+
+export const trayHit = (i: number): Rect => ({ x: trayX(i) - 28, y: 1150, w: 56, h: 90 });
 
 export const C = {
   wallDark: "#3a1d12",
@@ -89,6 +144,21 @@ export const C = {
   steakDone: "#8a4a26",
   lobRaw: "#a3919a",
   lobDone: "#e33b1c",
+  /* fryer + drinks */
+  oil: "#c98a2a",
+  oilLight: "#e8b757",
+  fryRaw: "#efe0b4",
+  fryDone: "#f6b93b",
+  fryOver: "#a3701f",
+  nugRaw: "#e8d5a6",
+  nugDone: "#cf8f3c",
+  nugOver: "#7f4c1c",
+  lemon: "#ffd93b",
+  lemonDeep: "#e8a71b",
+  aqua: "#9fdcf2",
+  aquaDeep: "#4aa6cc",
+  steel: "#c2cad1",
+  steelDark: "#4b5258",
 } as const;
 
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;

@@ -2,41 +2,71 @@ import {
   C,
   CARD,
   DH,
+  DRINKS,
+  DRINK_SLOTS,
   DW,
   FLOOR_Y,
   FRIDGE,
   FAMILY_BASE,
+  FRYER,
   GRATE_Y0,
   GRILL,
-  GRILL_METER_Y,
   HEART_Y,
   LILY_BASE,
   LILY_X,
+  OIL_Y0,
+  OIL_Y1,
   POT,
-  POT_METER_Y,
   SLOTS,
+  SOURCES,
   TABLE,
   TRAY,
   TRAY_CAP,
   TRAY_Y,
   clamp01,
-  doorRect,
+  cookMeterY,
+  drinkSlot,
+  drinkTap,
   easeOut,
+  fryMeterY,
+  fryerSlot,
+  grillSlot,
   mixHex,
+  potSlot,
   rnd,
   roundRect,
   roundRectPath,
-  slotX,
+  srcRect,
   trayX,
   type Rect,
 } from "./layout.ts";
-import type { GameState, Item, Kind } from "./state.ts";
+import { GOLDEN, KINDS, isDrink, isFried, type GameState, type Item, type Kind } from "./state.ts";
 
 const FONT = `"Avenir Next Rounded", "Avenir Next", ui-rounded, "Trebuchet MS", system-ui, sans-serif`;
 
 export const POPUP_BTN: Rect = { x: 202, y: 824, w: 316, h: 104 };
 /** Kept below design-y 36 so the iPhone status bar can't sit on it in standalone mode. */
 export const MUTE_BTN: Rect = { x: 636, y: 36, w: 60, h: 60 };
+
+/** Per-kind size correction, so one "base scale" reads evenly across all six items. */
+const KSCALE: Record<Kind, number> = {
+  steak: 1,
+  lobster: 0.78,
+  fries: 0.95,
+  nuggets: 1,
+  lemonade: 1.4,
+  water: 1.4,
+};
+export const kscale = (k: Kind, base: number): number => base * KSCALE[k];
+
+const LABEL: Record<Kind, string> = {
+  steak: "STEAK",
+  lobster: "LOBSTER",
+  fries: "FRIES",
+  nuggets: "NUGGETS",
+  lemonade: "LEMONADE",
+  water: "WATER",
+};
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -133,7 +163,7 @@ function drawBackdrop(c: Ctx): void {
   }
 
   // Warm lamp pool over the cooking line.
-  const lamp = c.createRadialGradient(330, 700, 40, 330, 800, 700);
+  const lamp = c.createRadialGradient(330, 700, 40, 330, 860, 760);
   lamp.addColorStop(0, "rgba(255,175,80,0.22)");
   lamp.addColorStop(1, "rgba(255,150,60,0)");
   c.fillStyle = lamp;
@@ -151,7 +181,7 @@ function drawRibs(c: Ctx, S: GameState, x0: number, x1: number, n: number, rodY:
 
   for (let i = 0; i < n; i++) {
     const x = n === 1 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (n - 1);
-    const h = 70 + rnd(i * 5 + x0) * 48;
+    const h = 60 + rnd(i * 5 + x0) * 42;
     const sway = Math.sin(S.t * 0.9 + i * 0.7 + x0 * 0.01) * 3.5;
     c.save();
     c.translate(x, rodY);
@@ -204,11 +234,11 @@ function leaf(c: Ctx, x: number, y: number, len: number, ang: number, col: strin
 
 function drawPlants(c: Ctx, S: GameState): void {
   const sway = Math.sin(S.t * 0.6) * 0.03;
-  leaf(c, 712, 470, 148, Math.PI * 0.9, C.greenDark, sway);
-  leaf(c, 716, 528, 130, Math.PI * 1.02, C.green, -sway);
-  leaf(c, 708, 428, 116, Math.PI * 0.76, C.greenLight, sway * 1.4);
-  leaf(c, -6, 470, 96, Math.PI * 0.08, C.greenDark, -sway);
-  leaf(c, -6, 512, 82, Math.PI * -0.08, C.green, sway);
+  leaf(c, 724, 448, 96, Math.PI * 0.92, C.greenDark, sway);
+  leaf(c, 726, 498, 84, Math.PI * 1.04, C.green, -sway);
+  leaf(c, 720, 408, 78, Math.PI * 0.78, C.greenLight, sway * 1.4);
+  leaf(c, -6, 448, 96, Math.PI * 0.08, C.greenDark, -sway);
+  leaf(c, -6, 494, 82, Math.PI * -0.08, C.green, sway);
 }
 
 /* -------------------------------------------------------------------- family */
@@ -297,18 +327,18 @@ function familyMember(
 
 function drawFamily(c: Ctx, S: GameState): void {
   const cheer = clamp01(S.cheer);
-  familyMember(c, 258, FAMILY_BASE, 0.64, "#3f7fa8", "#3d241a", cheer, S.t, 0);
-  familyMember(c, 462, FAMILY_BASE, 0.64, "#2f7d4f", "#241812", cheer, S.t, 2.1);
-  familyMember(c, 360, FAMILY_BASE + 8, 0.48, "#e2a33c", "#5a3a22", cheer, S.t, 4.2);
+  familyMember(c, 258, FAMILY_BASE, 0.62, "#3f7fa8", "#3d241a", cheer, S.t, 0);
+  familyMember(c, 462, FAMILY_BASE, 0.62, "#2f7d4f", "#241812", cheer, S.t, 2.1);
+  familyMember(c, 360, FAMILY_BASE + 8, 0.46, "#e2a33c", "#5a3a22", cheer, S.t, 4.2);
 
   const T = TABLE;
   c.fillStyle = "rgba(0,0,0,0.3)";
-  roundRect(c, T.x + 24, T.y + 96, T.w - 48, 14, 7);
+  roundRect(c, T.x + 24, T.y + 84, T.w - 48, 14, 7);
   c.fill();
   c.fillStyle = C.woodDark;
-  roundRect(c, T.x + 30, T.y + T.h - 6, 16, 62, 6);
+  roundRect(c, T.x + 30, T.y + T.h - 6, 16, 56, 6);
   c.fill();
-  roundRect(c, T.x + T.w - 46, T.y + T.h - 6, 16, 62, 6);
+  roundRect(c, T.x + T.w - 46, T.y + T.h - 6, 16, 56, 6);
   c.fill();
   const g = c.createLinearGradient(0, T.y, 0, T.y + T.h);
   g.addColorStop(0, C.woodLight);
@@ -323,11 +353,11 @@ function drawFamily(c: Ctx, S: GameState): void {
   for (const px of [T.x + 74, T.x + 184, T.x + 294]) {
     c.fillStyle = "rgba(255,248,235,0.9)";
     c.beginPath();
-    c.ellipse(px, T.y + 14, 38, 10, 0, 0, Math.PI * 2);
+    c.ellipse(px, T.y + 14, 36, 10, 0, 0, Math.PI * 2);
     c.fill();
     c.fillStyle = "rgba(0,0,0,0.10)";
     c.beginPath();
-    c.ellipse(px, T.y + 14, 26, 6, 0, 0, Math.PI * 2);
+    c.ellipse(px, T.y + 14, 24, 6, 0, 0, Math.PI * 2);
     c.fill();
   }
 }
@@ -335,12 +365,12 @@ function drawFamily(c: Ctx, S: GameState): void {
 /** Cosmetic "you're feeding them well" meter — five hearts filling up. */
 function drawHearts(c: Ctx, S: GameState): void {
   const n = 5;
-  const pitch = 48;
+  const pitch = 46;
   const fill = S.happy * n;
   for (let i = 0; i < n; i++) {
     const x = 360 + (i - (n - 1) / 2) * pitch;
     const k = clamp01(fill - i);
-    heartPath(c, x, HEART_Y, 15);
+    heartPath(c, x, HEART_Y, 14);
     c.fillStyle = "rgba(0,0,0,0.34)";
     c.fill();
     c.strokeStyle = "rgba(255,220,180,0.5)";
@@ -348,11 +378,11 @@ function drawHearts(c: Ctx, S: GameState): void {
     c.stroke();
     if (k > 0) {
       c.save();
-      heartPath(c, x, HEART_Y, 15);
+      heartPath(c, x, HEART_Y, 14);
       c.clip();
       const pop = k >= 1 ? 1 + Math.sin(S.t * 3 + i) * 0.04 : 1;
       c.fillStyle = "#ff5f7e";
-      c.fillRect(x - 20, HEART_Y + 22 - 44 * k * pop, 40, 44 * k * pop);
+      c.fillRect(x - 20, HEART_Y + 20 - 42 * k * pop, 40, 42 * k * pop);
       c.restore();
     }
   }
@@ -367,6 +397,7 @@ const ICON: Item = {
   scale: 1,
   rot: 0,
   cook: 1,
+  past: 0,
   pop: 0,
   glow: 0,
   flipped: true,
@@ -375,29 +406,30 @@ const ICON: Item = {
   tween: null,
 };
 
-function icon(c: Ctx, kind: Kind, x: number, y: number, s: number, cook = 1): void {
+/** Draws any of the six items as a static icon. `base` is folded through kscale(). */
+function icon(c: Ctx, kind: Kind, x: number, y: number, base: number, cook = 1): void {
   ICON.kind = kind;
   ICON.x = x;
   ICON.y = y;
-  ICON.scale = s;
+  ICON.scale = kscale(kind, base);
   ICON.cook = cook;
-  if (kind === "steak") drawSteak(c, ICON);
-  else drawLobster(c, ICON);
+  ICON.past = 0;
+  ICON.glow = 0;
+  drawItem(c, ICON);
 }
 
 function orderGroup(c: Ctx, kind: Kind, gx: number, gy: number, have: number, need: number): void {
-  icon(c, kind, gx - 52, gy, kind === "steak" ? 0.52 : 0.42);
+  icon(c, kind, gx - 40, gy, 0.34);
   const ok = have >= need;
-  const label = `${Math.min(have, need)}/${need}`;
-  txt(c, label, gx + 8, gy + 2, 42, ok ? "#2f7d4f" : "#8a3a12", "left", 800);
+  txt(c, `${Math.min(have, need)}/${need}`, gx - 6, gy + 2, 30, ok ? "#2f7d4f" : "#8a3a12", "left", 800);
   if (ok) {
     c.strokeStyle = "#2f7d4f";
-    c.lineWidth = 6;
+    c.lineWidth = 5;
     c.lineCap = "round";
     c.beginPath();
-    c.moveTo(gx + 84, gy + 2);
-    c.lineTo(gx + 94, gy + 13);
-    c.lineTo(gx + 114, gy - 14);
+    c.moveTo(gx + 50, gy + 2);
+    c.lineTo(gx + 58, gy + 11);
+    c.lineTo(gx + 73, gy - 12);
     c.stroke();
   }
 }
@@ -408,10 +440,7 @@ function drawOrderCard(c: Ctx, S: GameState): void {
   c.save();
   c.translate(shake, 0);
 
-  const x = CARD.x;
-  const y = CARD.y;
-  const w = CARD.w;
-  const h = CARD.h;
+  const { x, y, w, h } = CARD;
 
   c.fillStyle = "rgba(0,0,0,0.45)";
   roundRect(c, x + 6, y + 10, w, h, 20);
@@ -427,19 +456,22 @@ function drawOrderCard(c: Ctx, S: GameState): void {
   roundRect(c, x + 9, y + 9, w - 18, h - 18, 14);
   c.stroke();
 
+  const have: Record<string, number> = {};
+  for (const k of KINDS) have[k] = 0;
+  for (const it of S.tray) have[it.kind]++;
+  const ready = KINDS.every((k) => have[k] >= o.need[k]);
+
   // ready to serve — the only nudge this mode gives you
-  const haveS = S.tray.filter((i) => i.kind === "steak").length;
-  const haveL = S.tray.filter((i) => i.kind === "lobster").length;
-  if (haveS >= o.steak && haveL >= o.lobster) {
+  if (ready) {
     const pulse = 0.5 + 0.5 * Math.sin(S.t * 6);
     c.strokeStyle = `rgba(255,196,92,${0.45 + pulse * 0.55})`;
     c.lineWidth = 7;
     roundRect(c, x - 8, y - 8, w + 16, h + 16, 26);
     c.stroke();
     c.fillStyle = C.green;
-    roundRect(c, x + w / 2 - 74, y + h - 12, 148, 40, 20);
+    roundRect(c, x + w / 2 - 78, y + h - 14, 156, 34, 17);
     c.fill();
-    txt(c, "TAP TO SERVE", x + w / 2, y + h + 9, 20, "#eafff0");
+    txt(c, "TAP TO SERVE", x + w / 2, y + h + 4, 20, "#eafff0");
   }
 
   // pin
@@ -456,24 +488,30 @@ function drawOrderCard(c: Ctx, S: GameState): void {
   c.arc(x + w / 2 - 4, y - 4, 4.5, 0, Math.PI * 2);
   c.fill();
 
-  txt(c, `ORDER #${o.n}`, x + w / 2, y + 46, 38, C.red);
+  txt(c, `ORDER #${o.n}`, x + w / 2, y + 36, 34, C.red);
+  txt(c, `${o.total} item${o.total === 1 ? "" : "s"}`, x + w - 34, y + 36, 20, "#a97542", "right", 800);
+  if (o.variety) txt(c, "★ ALL SIX", x + 34, y + 36, 19, "#c98b0a", "left", 800);
 
-  const gy = y + 118;
-  if (o.lobster === 0) {
-    orderGroup(c, "steak", x + w / 2 - 30, gy, haveS, o.steak);
-  } else {
-    orderGroup(c, "steak", x + w * 0.28, gy, haveS, o.steak);
-    orderGroup(c, "lobster", x + w * 0.72, gy, haveL, o.lobster);
-  }
+  // up to six groups, at most three across
+  const groups = KINDS.filter((k) => o.need[k] > 0);
+  const half = Math.ceil(groups.length / 2);
+  const rows = groups.length > 3 ? [groups.slice(0, half), groups.slice(half)] : [groups];
+  const rowY = rows.length === 1 ? [y + 122] : [y + 92, y + 146];
+  rows.forEach((row, r) => {
+    row.forEach((kind, i) => {
+      const gx = x + w / 2 + (i - (row.length - 1) / 2) * 168;
+      orderGroup(c, kind, gx, rowY[r], have[kind], o.need[kind]);
+    });
+  });
 
   // timer bar
   const bx = x + 30;
   const bw = w - 60;
-  const by = y + 152;
-  const bh = 36;
+  const by = y + 176;
+  const bh = 34;
   const k = clamp01(o.left / o.limit);
   c.fillStyle = "rgba(60,26,12,0.28)";
-  roundRect(c, bx, by, bw, bh, 18);
+  roundRect(c, bx, by, bw, bh, 17);
   c.fill();
   const hot = k <= 0.22;
   const col = k > 0.5 ? ["#5fd07a", "#2f9d55"] : k > 0.22 ? ["#ffd166", "#f0a020"] : ["#ff7a5c", "#d92d20"];
@@ -481,7 +519,7 @@ function drawOrderCard(c: Ctx, S: GameState): void {
   bg.addColorStop(0, col[0]);
   bg.addColorStop(1, col[1]);
   c.save();
-  roundRect(c, bx, by, bw, bh, 18);
+  roundRect(c, bx, by, bw, bh, 17);
   c.clip();
   c.fillStyle = bg;
   c.fillRect(bx, by, Math.max(0, bw * k), bh);
@@ -492,26 +530,28 @@ function drawOrderCard(c: Ctx, S: GameState): void {
     const pulse = 0.45 + 0.55 * Math.abs(Math.sin(S.t * 7));
     c.strokeStyle = `rgba(255,120,90,${pulse})`;
     c.lineWidth = 4;
-    roundRect(c, bx, by, bw, bh, 18);
+    roundRect(c, bx, by, bw, bh, 17);
     c.stroke();
   }
-  shadowTxt(c, `${Math.ceil(Math.max(0, o.left))}s`, bx + bw / 2, by + bh / 2 + 1, 26, "#fff8ec");
+  shadowTxt(c, `${Math.ceil(Math.max(0, o.left))}s`, bx + bw / 2, by + bh / 2 + 1, 24, "#fff8ec");
   c.restore();
 }
 
 /* --------------------------------------------------------------------- grill */
 
+const GRATE_Y1 = 792;
+
 function drawCoals(c: Ctx, S: GameState): void {
   const g = GRILL;
   const heat = S.ignite;
   const y0 = GRATE_Y0 - 8;
-  const hh = 92;
+  const hh = GRATE_Y1 - y0 + 4;
   c.save();
   roundRect(c, g.x + 4, y0, g.w - 8, hh, 8);
   c.clip();
   c.fillStyle = "#0d0b0a";
   c.fillRect(g.x, y0 - 6, g.w, hh + 12);
-  for (let i = 0; i < 54; i++) {
+  for (let i = 0; i < 46; i++) {
     const cx = g.x + 12 + rnd(i * 2.3) * (g.w - 24);
     const cy = y0 + 10 + rnd(i * 5.7) * (hh - 20);
     const r = 7 + rnd(i * 1.9) * 9;
@@ -530,7 +570,7 @@ function drawCoals(c: Ctx, S: GameState): void {
   }
   if (heat > 0.05) {
     c.globalCompositeOperation = "lighter";
-    const gl = c.createRadialGradient(g.x + g.w / 2, y0 + hh / 2, 10, g.x + g.w / 2, y0 + hh / 2, g.w * 0.55);
+    const gl = c.createRadialGradient(g.x + g.w / 2, y0 + hh / 2, 10, g.x + g.w / 2, y0 + hh / 2, g.w * 0.7);
     gl.addColorStop(0, `rgba(255,120,20,${0.5 * heat})`);
     gl.addColorStop(1, "rgba(255,80,0,0)");
     c.fillStyle = gl;
@@ -546,40 +586,39 @@ function drawGrate(c: Ctx, S: GameState): void {
 
   // slot wells — four clearly separated cook zones on the grate
   for (let i = 0; i < SLOTS; i++) {
-    const sx = slotX(i);
+    const s = grillSlot(i);
     c.fillStyle = "rgba(0,0,0,0.4)";
-    roundRect(c, sx - 62, GRATE_Y0 - 6, 124, 78, 14);
+    roundRect(c, s.x - 70, s.y - 50, 140, 100, 14);
     c.fill();
     if (!S.grill[i]) {
       c.setLineDash([9, 9]);
       c.lineWidth = 3;
       c.strokeStyle = "rgba(255,214,150,0.26)";
-      roundRect(c, sx - 54, GRATE_Y0 + 2, 108, 62, 12);
+      roundRect(c, s.x - 60, s.y - 40, 120, 80, 12);
       c.stroke();
       c.setLineDash([]);
     }
   }
 
-  for (let i = 0; i < 5; i++) {
-    const y = GRATE_Y0 + i * 16;
-    const bar = c.createLinearGradient(0, y, 0, y + 9);
+  for (let y = GRATE_Y0; y < GRATE_Y1; y += 18) {
+    const bar = c.createLinearGradient(0, y, 0, y + 8);
     bar.addColorStop(0, "#b9c0c6");
     bar.addColorStop(0.4, "#767e85");
     bar.addColorStop(1, "#33383d");
     c.fillStyle = bar;
-    roundRect(c, x0, y, w, 9, 5);
+    roundRect(c, x0, y, w, 8, 4);
     c.fill();
   }
   // slot dividers
   c.fillStyle = "#5a6167";
-  for (let i = 1; i < SLOTS; i++) {
-    roundRect(c, slotX(i) - 76, GRATE_Y0 - 10, 9, 96, 5);
-    c.fill();
-  }
-  c.fillStyle = "#4a5157";
-  roundRect(c, x0 - 8, GRATE_Y0 - 12, 12, 100, 6);
+  roundRect(c, 182, GRATE_Y0 - 8, 8, GRATE_Y1 - GRATE_Y0 + 16, 4);
   c.fill();
-  roundRect(c, x0 + w - 4, GRATE_Y0 - 12, 12, 100, 6);
+  roundRect(c, x0, 684, w, 8, 4);
+  c.fill();
+  c.fillStyle = "#4a5157";
+  roundRect(c, x0 - 8, GRATE_Y0 - 12, 12, GRATE_Y1 - GRATE_Y0 + 24, 6);
+  c.fill();
+  roundRect(c, x0 + w - 4, GRATE_Y0 - 12, 12, GRATE_Y1 - GRATE_Y0 + 24, 6);
   c.fill();
 }
 
@@ -610,16 +649,16 @@ function drawFlamesBack(c: Ctx, S: GameState): void {
   const g = GRILL;
   c.save();
   c.globalCompositeOperation = "lighter";
-  const n = 11;
+  const n = 7;
   for (let i = 0; i < n; i++) {
     const x = g.x + 24 + (i * (g.w - 48)) / (n - 1);
     const breathe = 0.68 + 0.32 * Math.sin(S.t * 3.1 + i * 1.9);
-    const h = (58 + rnd(i * 3.3) * 52) * S.ignite * breathe;
-    const w = 26 + rnd(i * 7.7) * 15;
-    flameTongue(c, x, GRATE_Y0 + 24 - rnd(i) * 12, w, h, S.t, i);
+    const h = (40 + rnd(i * 3.3) * 34) * S.ignite * breathe;
+    const w = 24 + rnd(i * 7.7) * 14;
+    flameTongue(c, x, GRATE_Y0 + 22 - rnd(i) * 10, w, h, S.t, i);
   }
-  const bloom = c.createRadialGradient(g.x + g.w / 2, GRATE_Y0 - 30, 8, g.x + g.w / 2, GRATE_Y0 - 30, 260 * S.ignite);
-  bloom.addColorStop(0, `rgba(255,140,30,${0.24 * S.ignite})`);
+  const bloom = c.createRadialGradient(g.x + g.w / 2, GRATE_Y0 - 30, 8, g.x + g.w / 2, GRATE_Y0 - 30, 240 * S.ignite);
+  bloom.addColorStop(0, `rgba(255,140,30,${0.22 * S.ignite})`);
   bloom.addColorStop(1, "rgba(255,90,0,0)");
   c.fillStyle = bloom;
   c.fillRect(g.x - 140, GRATE_Y0 - 300, g.w + 280, 340);
@@ -632,11 +671,11 @@ function drawFlamesFront(c: Ctx, S: GameState): void {
   c.save();
   c.globalCompositeOperation = "lighter";
   c.globalAlpha = 0.85;
-  for (let i = 0; i < 8; i++) {
-    const x = g.x + 34 + (i * (g.w - 68)) / 7;
+  for (let i = 0; i < 6; i++) {
+    const x = g.x + 34 + (i * (g.w - 68)) / 5;
     const breathe = 0.6 + 0.4 * Math.sin(S.t * 4.3 + i * 2.6);
-    const h = (26 + rnd(i * 9.1) * 24) * S.ignite * breathe;
-    flameTongue(c, x, GRATE_Y0 + 74, 20 + rnd(i * 4.4) * 11, h, S.t * 1.2, i + 11);
+    const h = (24 + rnd(i * 9.1) * 22) * S.ignite * breathe;
+    flameTongue(c, x, 700, 18 + rnd(i * 4.4) * 10, h, S.t * 1.2, i + 11);
   }
   c.restore();
 }
@@ -645,102 +684,88 @@ function drawGrillBody(c: Ctx, S: GameState): void {
   const g = GRILL;
   const bot = g.y + g.h;
   c.fillStyle = "rgba(0,0,0,0.4)";
-  roundRect(c, g.x - 6, bot - 12, g.w + 12, 20, 9);
+  roundRect(c, g.x - 4, bot - 12, g.w + 8, 20, 9);
   c.fill();
 
-  // back lip — also the shelf the cook meters sit on
+  // back lip — also the shelf the top row of cook meters sits on
   c.fillStyle = "#191614";
-  roundRect(c, g.x - 12, g.y, g.w + 24, 48, 10);
+  roundRect(c, g.x - 8, g.y, g.w + 16, 42, 10);
   c.fill();
   c.fillStyle = "rgba(255,220,170,0.12)";
-  roundRect(c, g.x - 10, g.y + 2, g.w + 20, 5, 3);
+  roundRect(c, g.x - 6, g.y + 2, g.w + 12, 5, 3);
   c.fill();
 
   drawCoals(c, S);
   drawGrate(c, S);
 
   // front lip
-  const lipY = GRATE_Y0 + 86;
-  const lip = c.createLinearGradient(0, lipY, 0, lipY + 30);
+  const lipY = GRATE_Y1;
+  const lip = c.createLinearGradient(0, lipY, 0, lipY + 22);
   lip.addColorStop(0, "#43494e");
   lip.addColorStop(1, "#15120f");
   c.fillStyle = lip;
-  roundRect(c, g.x - 14, lipY, g.w + 28, 32, 9);
+  roundRect(c, g.x - 10, lipY, g.w + 20, 22, 9);
   c.fill();
   c.fillStyle = "rgba(255,220,170,0.22)";
-  roundRect(c, g.x - 12, lipY + 2, g.w + 24, 4, 2);
+  roundRect(c, g.x - 8, lipY + 2, g.w + 16, 4, 2);
   c.fill();
 
-  // firebox front
-  const boxY = lipY + 26;
+  // firebox front + brand plate
+  const boxY = lipY + 18;
   const box = c.createLinearGradient(0, boxY, 0, bot);
   box.addColorStop(0, "#2b2523");
   box.addColorStop(0.5, C.black2);
   box.addColorStop(1, C.black);
   c.fillStyle = box;
-  roundRect(c, g.x - 6, boxY, g.w + 12, bot - boxY, 12);
+  roundRect(c, g.x - 4, boxY, g.w + 8, bot - boxY, 12);
   c.fill();
 
   if (S.ignite > 0.05) {
     c.save();
     c.globalCompositeOperation = "lighter";
-    const seam = c.createLinearGradient(0, boxY + 8, 0, boxY + 40);
-    seam.addColorStop(0, `rgba(255,120,20,${0.8 * S.ignite})`);
+    const seam = c.createLinearGradient(0, boxY + 4, 0, boxY + 26);
+    seam.addColorStop(0, `rgba(255,120,20,${0.75 * S.ignite})`);
     seam.addColorStop(1, "rgba(255,60,0,0)");
     c.fillStyle = seam;
-    roundRect(c, g.x + 22, boxY + 8, g.w - 44, 32, 8);
+    roundRect(c, g.x + 16, boxY + 4, g.w - 32, 22, 8);
     c.fill();
     c.restore();
   }
 
-  // brand plate
-  const py = boxY + 46;
   c.fillStyle = "rgba(0,0,0,0.5)";
-  roundRect(c, g.x + 128, py, g.w - 256, 34, 9);
+  roundRect(c, g.x + 62, boxY + 4, g.w - 124, 22, 8);
   c.fill();
   c.strokeStyle = "rgba(255,196,92,0.5)";
   c.lineWidth = 2;
-  roundRect(c, g.x + 132, py + 3, g.w - 264, 28, 7);
+  roundRect(c, g.x + 66, boxY + 7, g.w - 132, 16, 6);
   c.stroke();
-  txt(c, "LILY'S  ISLAND  GRILL", g.x + g.w / 2, py + 18, 20, "rgba(255,233,201,0.8)");
-
-  // vent slots
-  c.fillStyle = "rgba(0,0,0,0.75)";
-  for (let i = 0; i < 6; i++) {
-    roundRect(c, g.x + 24 + i * 92, py + 44, 44, 12, 6);
-    c.fill();
-  }
-  c.fillStyle = `rgba(255,140,40,${0.5 * S.ignite})`;
-  for (let i = 0; i < 6; i++) {
-    roundRect(c, g.x + 26 + i * 92, py + 46, 40, 6, 3);
-    c.fill();
-  }
+  txt(c, "LILY'S  GRILL", g.x + g.w / 2, boxY + 15, 15, "rgba(255,233,201,0.8)");
 
   // wooden handle rail
   c.fillStyle = C.woodDark;
-  roundRect(c, g.x - 18, bot - 24, g.w + 36, 16, 8);
+  roundRect(c, g.x - 12, bot - 12, g.w + 24, 12, 6);
   c.fill();
   c.fillStyle = C.wood;
-  roundRect(c, g.x - 18, bot - 24, g.w + 36, 10, 5);
+  roundRect(c, g.x - 12, bot - 12, g.w + 24, 8, 4);
   c.fill();
 }
 
 /* ----------------------------------------------------------------------- pot */
 
-const POT_CX = POT.x + POT.w / 2;
-const RIM_Y = POT.y + 32;
+const POT_RIM_Y = 552;
+const POT_WATER: Rect = { x: POT.x + 22, y: 572, w: POT.w - 44, h: 234 };
 
 function drawPotBack(c: Ctx, S: GameState): void {
   const p = POT;
   const bot = p.y + p.h;
 
   c.fillStyle = "rgba(0,0,0,0.4)";
-  roundRect(c, p.x + 10, bot - 10, p.w - 20, 18, 9);
+  roundRect(c, p.x + 10, bot - 14, p.w - 20, 18, 9);
   c.fill();
 
   // burner
   c.fillStyle = "#2c2724";
-  roundRect(c, p.x + 40, bot - 22, p.w - 80, 16, 8);
+  roundRect(c, p.x + 44, bot - 26, p.w - 88, 16, 8);
   c.fill();
 
   // body
@@ -751,10 +776,10 @@ function drawPotBack(c: Ctx, S: GameState): void {
   body.addColorStop(1, "#33383d");
   c.fillStyle = body;
   c.beginPath();
-  c.moveTo(p.x + 6, RIM_Y);
-  c.lineTo(p.x + p.w - 6, RIM_Y);
-  c.lineTo(p.x + p.w - 30, bot - 14);
-  c.lineTo(p.x + 30, bot - 14);
+  c.moveTo(p.x + 4, POT_RIM_Y + 16);
+  c.lineTo(p.x + p.w - 4, POT_RIM_Y + 16);
+  c.lineTo(p.x + p.w - 20, bot - 20);
+  c.lineTo(p.x + 20, bot - 20);
   c.closePath();
   c.fill();
 
@@ -762,45 +787,44 @@ function drawPotBack(c: Ctx, S: GameState): void {
   c.strokeStyle = "#3a4046";
   c.lineWidth = 11;
   c.beginPath();
-  c.arc(p.x + 12, RIM_Y + 46, 18, Math.PI * 0.4, Math.PI * 1.6);
+  c.arc(p.x + 10, POT_RIM_Y + 92, 18, Math.PI * 0.4, Math.PI * 1.6);
   c.stroke();
   c.beginPath();
-  c.arc(p.x + p.w - 12, RIM_Y + 46, 18, Math.PI * 1.4, Math.PI * 0.6);
+  c.arc(p.x + p.w - 10, POT_RIM_Y + 92, 18, Math.PI * 1.4, Math.PI * 0.6);
   c.stroke();
 
   // rim
-  const rim = c.createLinearGradient(0, RIM_Y - 24, 0, RIM_Y + 24);
-  rim.addColorStop(0, "#c2cad1");
-  rim.addColorStop(1, "#4b5258");
+  const rim = c.createLinearGradient(0, POT_RIM_Y, 0, POT_RIM_Y + 40);
+  rim.addColorStop(0, C.steel);
+  rim.addColorStop(1, C.steelDark);
   c.fillStyle = rim;
-  c.beginPath();
-  c.ellipse(POT_CX, RIM_Y, p.w / 2 - 4, 46, 0, 0, Math.PI * 2);
+  roundRect(c, p.x + 2, POT_RIM_Y, p.w - 4, 40, 20);
   c.fill();
 
   // water
-  const wob = Math.sin(S.t * 4) * 1.6;
-  const water = c.createLinearGradient(0, RIM_Y - 38, 0, RIM_Y + 38);
+  const W = POT_WATER;
+  const wob = Math.sin(S.t * 4) * 1.4;
+  const water = c.createLinearGradient(0, W.y, 0, W.y + W.h);
   water.addColorStop(0, "#9fc6d6");
-  water.addColorStop(0.45, "#cfe6ef");
+  water.addColorStop(0.4, "#cfe6ef");
   water.addColorStop(1, "#5d8496");
   c.fillStyle = water;
-  c.beginPath();
-  c.ellipse(POT_CX, RIM_Y + 4 + wob * 0.3, p.w / 2 - 20, 38, 0, 0, Math.PI * 2);
+  roundRect(c, W.x, W.y + wob * 0.3, W.w, W.h, 40);
   c.fill();
 
   // four bubbling wells
   for (let i = 0; i < SLOTS; i++) {
-    const sx = slotX(i);
+    const s = potSlot(i);
     c.fillStyle = "rgba(30,70,90,0.28)";
     c.beginPath();
-    c.ellipse(sx, RIM_Y + 6, 58, 28, 0, 0, Math.PI * 2);
+    c.ellipse(s.x, s.y + 4, 62, 38, 0, 0, Math.PI * 2);
     c.fill();
     if (!S.pot[i]) {
       c.setLineDash([9, 9]);
       c.lineWidth = 3;
       c.strokeStyle = "rgba(255,255,255,0.42)";
       c.beginPath();
-      c.ellipse(sx, RIM_Y + 6, 48, 22, 0, 0, Math.PI * 2);
+      c.ellipse(s.x, s.y + 4, 52, 30, 0, 0, Math.PI * 2);
       c.stroke();
       c.setLineDash([]);
     } else {
@@ -810,7 +834,7 @@ function drawPotBack(c: Ctx, S: GameState): void {
         c.strokeStyle = `rgba(255,255,255,${0.35 * (1 - ph)})`;
         c.lineWidth = 2.5;
         c.beginPath();
-        c.ellipse(sx, RIM_Y + 6, 14 + ph * 40, 7 + ph * 19, 0, 0, Math.PI * 2);
+        c.ellipse(s.x, s.y + 4, 12 + ph * 44, 7 + ph * 26, 0, 0, Math.PI * 2);
         c.stroke();
       }
     }
@@ -819,45 +843,298 @@ function drawPotBack(c: Ctx, S: GameState): void {
 
 function drawPotFront(c: Ctx, S: GameState): void {
   const p = POT;
+  const W = POT_WATER;
   // translucent water sheen over whatever is submerged
   c.save();
-  c.beginPath();
-  c.ellipse(POT_CX, RIM_Y + 4, p.w / 2 - 20, 38, 0, 0, Math.PI * 2);
+  roundRect(c, W.x, W.y, W.w, W.h, 40);
   c.clip();
   c.fillStyle = "rgba(150,205,225,0.3)";
-  c.fillRect(p.x, RIM_Y - 40, p.w, 90);
+  c.fillRect(W.x, W.y, W.w, W.h);
   c.fillStyle = "rgba(255,255,255,0.22)";
   c.beginPath();
-  c.ellipse(POT_CX - 150, RIM_Y - 14, 60, 9, 0, 0, Math.PI * 2);
+  c.ellipse(W.x + 74, W.y + 20, 52, 9, 0, 0, Math.PI * 2);
   c.fill();
   c.restore();
 
   // rim highlight
   c.strokeStyle = "rgba(255,255,255,0.35)";
   c.lineWidth = 4;
-  c.beginPath();
-  c.ellipse(POT_CX, RIM_Y - 2, p.w / 2 - 8, 42, 0, Math.PI * 1.06, Math.PI * 1.94);
+  roundRect(c, p.x + 8, POT_RIM_Y + 5, p.w - 16, 30, 15);
   c.stroke();
 
   if (S.potBoil > 0.05) {
     c.save();
     c.globalCompositeOperation = "lighter";
-    const gl = c.createRadialGradient(POT_CX, RIM_Y, 6, POT_CX, RIM_Y, 240);
+    const gl = c.createRadialGradient(p.x + p.w / 2, W.y + W.h / 2, 6, p.x + p.w / 2, W.y + W.h / 2, 240);
     gl.addColorStop(0, `rgba(180,230,255,${0.12 * S.potBoil})`);
     gl.addColorStop(1, "rgba(180,230,255,0)");
     c.fillStyle = gl;
     c.fillRect(p.x - 60, p.y - 60, p.w + 120, p.h + 120);
     c.restore();
   }
+
+  // "STEAM POT" plate on the front band
+  c.fillStyle = "rgba(0,0,0,0.42)";
+  roundRect(c, p.x + 84, p.y + p.h - 60, p.w - 168, 26, 8);
+  c.fill();
+  txt(c, "STEAM  POT", p.x + p.w / 2, p.y + p.h - 46, 17, "rgba(255,233,201,0.75)");
 }
 
-/* -------------------------------------------------------------------- fridge */
+/* --------------------------------------------------------------------- fryer */
 
-function drawDoor(c: Ctx, S: GameState, d: number, kind: Kind, label: string): void {
-  const r = doorRect(d);
-  const flash = S.doorFlash[d];
-  const full = S.doorFull[d];
-  const shake = full > 0 ? Math.sin(full * 52) * full * 9 : 0;
+function drawFryer(c: Ctx, S: GameState): void {
+  const f = FRYER;
+  const bot = f.y + f.h;
+
+  c.fillStyle = "rgba(0,0,0,0.42)";
+  roundRect(c, f.x + 6, bot - 14, f.w - 12, 20, 9);
+  c.fill();
+
+  // body
+  const body = c.createLinearGradient(f.x, 0, f.x + f.w, 0);
+  body.addColorStop(0, "#3c4247");
+  body.addColorStop(0.32, "#7d858c");
+  body.addColorStop(0.66, "#525a60");
+  body.addColorStop(1, "#2e3337");
+  c.fillStyle = body;
+  roundRect(c, f.x + 4, f.y + 8, f.w - 8, f.h - 18, 16);
+  c.fill();
+
+  // rim
+  const rim = c.createLinearGradient(0, f.y + 4, 0, f.y + 40);
+  rim.addColorStop(0, C.steel);
+  rim.addColorStop(1, C.steelDark);
+  c.fillStyle = rim;
+  roundRect(c, f.x, f.y + 4, f.w, 34, 14);
+  c.fill();
+
+  // hot oil
+  const oil = c.createLinearGradient(0, OIL_Y0, 0, OIL_Y1);
+  oil.addColorStop(0, C.oilLight);
+  oil.addColorStop(0.4, C.oil);
+  oil.addColorStop(1, "#8d5c14");
+  c.fillStyle = oil;
+  roundRect(c, f.x + 18, OIL_Y0, f.w - 36, OIL_Y1 - OIL_Y0, 22);
+  c.fill();
+
+  // faint rolling shimmer, always on — the oil is never off in arcade mode
+  c.save();
+  roundRect(c, f.x + 18, OIL_Y0, f.w - 36, OIL_Y1 - OIL_Y0, 22);
+  c.clip();
+  for (let i = 0; i < 10; i++) {
+    const ph = (S.t * 0.35 + i * 0.1) % 1;
+    c.fillStyle = `rgba(255,238,190,${0.06 * S.fryHeat * (1 - ph)})`;
+    c.beginPath();
+    c.ellipse(f.x + 34 + rnd(i * 3.7) * (f.w - 68), OIL_Y0 + 20 + ph * (OIL_Y1 - OIL_Y0 - 30), 30 + ph * 26, 8 + ph * 7, 0, 0, Math.PI * 2);
+    c.fill();
+  }
+  c.restore();
+
+  // wire basket — a rounded frame plus a mesh grid, sitting in the oil
+  c.save();
+  c.strokeStyle = "rgba(200,212,220,0.5)";
+  c.lineWidth = 2;
+  roundRect(c, f.x + 26, OIL_Y0 + 8, f.w - 52, OIL_Y1 - OIL_Y0 - 16, 18);
+  c.clip();
+  for (let x = f.x + 26; x < f.x + f.w - 26; x += 16) {
+    c.beginPath();
+    c.moveTo(x, OIL_Y0);
+    c.lineTo(x, OIL_Y1);
+    c.stroke();
+  }
+  for (let y = OIL_Y0 + 8; y < OIL_Y1; y += 16) {
+    c.beginPath();
+    c.moveTo(f.x, y);
+    c.lineTo(f.x + f.w, y);
+    c.stroke();
+  }
+  c.restore();
+  c.strokeStyle = "rgba(215,226,233,0.85)";
+  c.lineWidth = 4;
+  roundRect(c, f.x + 26, OIL_Y0 + 8, f.w - 52, OIL_Y1 - OIL_Y0 - 16, 18);
+  c.stroke();
+  // basket handle
+  c.strokeStyle = "#b6c0c7";
+  c.lineWidth = 8;
+  c.lineCap = "round";
+  c.beginPath();
+  c.moveTo(f.x + f.w - 32, OIL_Y0 + 16);
+  c.lineTo(f.x + f.w - 4, f.y + 26);
+  c.stroke();
+  c.fillStyle = C.woodDark;
+  roundRect(c, f.x + f.w - 16, f.y + 14, 22, 16, 7);
+  c.fill();
+
+  // four fry wells
+  for (let i = 0; i < SLOTS; i++) {
+    const s = fryerSlot(i);
+    c.fillStyle = "rgba(70,40,6,0.28)";
+    roundRect(c, s.x - 66, s.y - 38, 132, 76, 16);
+    c.fill();
+    if (!S.fryer[i]) {
+      c.setLineDash([8, 8]);
+      c.lineWidth = 3;
+      c.strokeStyle = "rgba(255,240,200,0.4)";
+      roundRect(c, s.x - 56, s.y - 31, 112, 62, 14);
+      c.stroke();
+      c.setLineDash([]);
+    }
+  }
+
+  // front control panel
+  c.fillStyle = "#20252a";
+  roundRect(c, f.x + 8, OIL_Y1 + 2, f.w - 16, 24, 9);
+  c.fill();
+  c.fillStyle = "rgba(0,0,0,0.45)";
+  roundRect(c, f.x + 76, OIL_Y1 + 5, f.w - 152, 18, 6);
+  c.fill();
+  txt(c, "DEEP  FRYER", f.x + f.w / 2, OIL_Y1 + 14, 15, "rgba(255,233,201,0.8)");
+  // heat lamp
+  const pulse = 0.55 + 0.45 * Math.abs(Math.sin(S.t * 2.4));
+  c.fillStyle = `rgba(255,140,40,${0.5 + pulse * 0.5})`;
+  c.beginPath();
+  c.arc(f.x + 34, OIL_Y1 + 14, 6, 0, Math.PI * 2);
+  c.fill();
+
+  // wooden plinth
+  c.fillStyle = C.woodDark;
+  roundRect(c, f.x + 4, bot - 14, f.w - 8, 14, 7);
+  c.fill();
+  c.fillStyle = C.wood;
+  roundRect(c, f.x + 4, bot - 14, f.w - 8, 9, 5);
+  c.fill();
+}
+
+/* --------------------------------------------------------------- drink maker */
+
+const DRINK_COL: [string, string][] = [
+  [C.lemon, C.lemonDeep],
+  [C.aqua, C.aquaDeep],
+];
+
+function drawDrinkMaker(c: Ctx, S: GameState): void {
+  const d = DRINKS;
+  const bot = d.y + d.h;
+
+  c.fillStyle = "rgba(0,0,0,0.42)";
+  roundRect(c, d.x + 6, bot - 14, d.w - 12, 20, 9);
+  c.fill();
+
+  // machine head
+  const head = c.createLinearGradient(0, d.y + 12, 0, d.y + 136);
+  head.addColorStop(0, "#f6e7cd");
+  head.addColorStop(1, "#cbb190");
+  c.fillStyle = head;
+  roundRect(c, d.x + 6, d.y + 12, d.w - 12, 124, 18);
+  c.fill();
+  c.fillStyle = C.red;
+  roundRect(c, d.x + 6, d.y + 12, d.w - 12, 30, 15);
+  c.fill();
+  c.fillStyle = "rgba(0,0,0,0.18)";
+  roundRect(c, d.x + 6, d.y + 34, d.w - 12, 8, 4);
+  c.fill();
+  txt(c, "FRESH  DRINKS", d.x + d.w / 2, d.y + 27, 18, C.cream);
+
+  // two taps
+  for (let i = 0; i < DRINK_SLOTS; i++) {
+    const t = drinkTap(i);
+    const [lite, deep] = DRINK_COL[i];
+    const busy = !!S.drinks[i];
+    const g = c.createLinearGradient(0, t.y - 27, 0, t.y + 27);
+    g.addColorStop(0, lite);
+    g.addColorStop(1, deep);
+    c.fillStyle = "rgba(0,0,0,0.28)";
+    roundRect(c, t.x - 66, t.y - 23, 132, 52, 16);
+    c.fill();
+    c.fillStyle = g;
+    roundRect(c, t.x - 66, t.y - 27, 132, 52, 16);
+    c.fill();
+    c.strokeStyle = busy ? "rgba(255,255,255,0.9)" : "rgba(90,50,25,0.45)";
+    c.lineWidth = 4;
+    roundRect(c, t.x - 66, t.y - 27, 132, 52, 16);
+    c.stroke();
+    txt(c, i === 0 ? "LEMONADE" : "WATER", t.x, t.y, 21, i === 0 ? "#7a4a05" : "#12455e");
+
+    // chrome spout under the head
+    c.fillStyle = "#aeb8bf";
+    roundRect(c, t.x - 13, d.y + 128, 26, 22, 6);
+    c.fill();
+    c.fillStyle = "#7d878e";
+    roundRect(c, t.x - 8, d.y + 146, 16, 10, 4);
+    c.fill();
+    c.fillStyle = "rgba(255,255,255,0.45)";
+    roundRect(c, t.x - 10, d.y + 131, 5, 16, 2);
+    c.fill();
+
+    // the stream, while a glass is filling
+    const it = S.drinks[i];
+    if (it && !it.tween && it.cook < 1) {
+      c.fillStyle = i === 0 ? "rgba(255,217,59,0.85)" : "rgba(159,220,242,0.8)";
+      c.fillRect(t.x - 4, d.y + 154, 8, drinkSlot(i).y - 8 - (d.y + 154));
+      c.fillStyle = "rgba(255,255,255,0.4)";
+      c.fillRect(t.x - 4, d.y + 154, 3, drinkSlot(i).y - 8 - (d.y + 154));
+    }
+
+    // empty pour position marker
+    if (!it) {
+      const s = drinkSlot(i);
+      c.setLineDash([8, 8]);
+      c.lineWidth = 3;
+      c.strokeStyle = "rgba(255,240,210,0.34)";
+      c.beginPath();
+      c.ellipse(s.x, s.y + 26, 30, 11, 0, 0, Math.PI * 2);
+      c.stroke();
+      c.setLineDash([]);
+    }
+  }
+
+  // counter + drip tray
+  c.fillStyle = "#2a2f33";
+  roundRect(c, d.x + 8, 1080, d.w - 16, 24, 9);
+  c.fill();
+  c.fillStyle = "#4d555b";
+  for (let i = 0; i < DRINK_SLOTS; i++) {
+    const t = drinkTap(i);
+    roundRect(c, t.x - 48, 1084, 96, 15, 6);
+    c.fill();
+  }
+  c.strokeStyle = "rgba(190,205,214,0.5)";
+  c.lineWidth = 2;
+  for (let i = 0; i < DRINK_SLOTS; i++) {
+    const t = drinkTap(i);
+    for (let k = -3; k <= 3; k++) {
+      c.beginPath();
+      c.moveTo(t.x + k * 13, 1086);
+      c.lineTo(t.x + k * 13, 1097);
+      c.stroke();
+    }
+    // a shallow pool of whatever was just poured
+    const it = S.drinks[i];
+    if (it && !it.tween && it.cook < 1) {
+      c.fillStyle = i === 0 ? "rgba(255,217,59,0.5)" : "rgba(159,220,242,0.5)";
+      c.beginPath();
+      c.ellipse(t.x, 1092, 26, 5, 0, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+
+  // wooden plinth
+  c.fillStyle = C.woodDark;
+  roundRect(c, d.x + 4, bot - 14, d.w - 8, 14, 7);
+  c.fill();
+  c.fillStyle = C.wood;
+  roundRect(c, d.x + 4, bot - 14, d.w - 8, 9, 5);
+  c.fill();
+}
+
+/* -------------------------------------------------------------------- pantry */
+
+function drawSource(c: Ctx, S: GameState, i: number): void {
+  const kind = KINDS[i];
+  const r = srcRect(i);
+  const flash = S.srcFlash[i];
+  const full = S.srcFull[i];
+  const shake = full > 0 ? Math.sin(full * 52) * full * 8 : 0;
   c.save();
   c.translate(shake, 0);
 
@@ -866,91 +1143,84 @@ function drawDoor(c: Ctx, S: GameState, d: number, kind: Kind, label: string): v
   g.addColorStop(0.45, "#efdcbd");
   g.addColorStop(1, "#d6bd99");
   c.fillStyle = g;
-  roundRect(c, r.x, r.y, r.w, r.h, 18);
+  roundRect(c, r.x, r.y, r.w, r.h, 14);
   c.fill();
   c.strokeStyle = "rgba(90,50,25,0.55)";
-  c.lineWidth = 5;
+  c.lineWidth = 4;
   c.stroke();
 
-  // chilled interior window
-  const ix = r.x + 22;
-  const iy = r.y + 18;
-  const iw = r.w - 74;
-  const ih = r.h - 74;
+  // chilled window
+  const ix = r.x + 8;
+  const iy = r.y + 8;
+  const iw = 76;
+  const ih = r.h - 16;
   const cav = c.createLinearGradient(ix, iy, ix, iy + ih);
-  cav.addColorStop(0, "#dfeef6");
+  cav.addColorStop(0, isDrink(kind) ? "#eef7fb" : "#dfeef6");
   cav.addColorStop(1, "#a9c4d2");
   c.fillStyle = cav;
-  roundRect(c, ix, iy, iw, ih, 12);
+  roundRect(c, ix, iy, iw, ih, 10);
   c.fill();
   c.strokeStyle = "rgba(90,50,25,0.25)";
-  c.lineWidth = 3;
+  c.lineWidth = 2.5;
   c.stroke();
 
-  icon(c, kind, ix + iw / 2, iy + ih / 2 + (kind === "lobster" ? -4 : 0), kind === "steak" ? 0.94 : 0.78, 0);
-
-  // wooden trim + chrome handle
-  c.fillStyle = C.woodDark;
-  roundRect(c, r.x + r.w - 42, r.y + 30, 18, r.h - 60, 9);
-  c.fill();
-  c.fillStyle = "#c9d2d8";
-  roundRect(c, r.x + r.w - 40, r.y + 34, 14, r.h - 76, 7);
-  c.fill();
+  // fried items are near-white when raw, so nudge them golden enough to read at icon size
+  icon(c, kind, ix + iw / 2, iy + ih / 2, 0.55, isDrink(kind) ? 1 : isFried(kind) ? 0.45 : 0);
 
   // label plate
-  const ly = r.y + r.h - 44;
   c.fillStyle = C.red;
-  roundRect(c, ix, ly, iw, 34, 9);
+  roundRect(c, r.x + 92, r.y + 27, r.w - 104, 32, 10);
   c.fill();
-  txt(c, label, ix + iw / 2, ly + 18, 24, C.cream);
+  txt(c, LABEL[kind], r.x + 92 + (r.w - 104) / 2, r.y + 44, 20, C.cream);
 
   if (flash > 0) {
     c.fillStyle = `rgba(255,255,255,${flash * 0.5})`;
-    roundRect(c, r.x, r.y, r.w, r.h, 18);
+    roundRect(c, r.x, r.y, r.w, r.h, 14);
     c.fill();
   }
   if (full > 0) {
     c.fillStyle = `rgba(20,9,4,${full * 0.45})`;
-    roundRect(c, r.x, r.y, r.w, r.h, 18);
+    roundRect(c, r.x, r.y, r.w, r.h, 14);
     c.fill();
     c.save();
     c.globalAlpha = clamp01(full * 1.6);
     c.translate(r.x + r.w / 2, r.y + r.h / 2);
-    c.rotate(-0.12);
-    c.fillStyle = "rgba(20,9,4,0.8)";
-    roundRect(c, -104, -30, 208, 60, 14);
+    c.rotate(-0.1);
+    const wide = S.srcMsg[i].length > 5;
+    const bw = wide ? 190 : 120;
+    c.fillStyle = "rgba(20,9,4,0.82)";
+    roundRect(c, -bw / 2 - 4, -26, bw + 8, 52, 13);
     c.fill();
     c.strokeStyle = "#ff9a7a";
     c.lineWidth = 4;
-    roundRect(c, -100, -26, 200, 52, 11);
+    roundRect(c, -bw / 2, -22, bw, 44, 10);
     c.stroke();
-    txt(c, "FULL", 0, 2, 40, "#ff9a7a");
+    txt(c, S.srcMsg[i], 0, 1, wide ? 28 : 32, "#ff9a7a");
     c.restore();
   }
   c.restore();
 }
 
-function drawFridge(c: Ctx, S: GameState): void {
+function drawPantry(c: Ctx, S: GameState): void {
   const F = FRIDGE;
   c.fillStyle = "rgba(0,0,0,0.42)";
-  roundRect(c, F.x + 8, F.y + 14, F.w, F.h, 24);
+  roundRect(c, F.x + 8, F.y + 14, F.w, F.h, 22);
   c.fill();
   const body = c.createLinearGradient(0, F.y, 0, F.y + F.h);
   body.addColorStop(0, "#5b6167");
   body.addColorStop(1, "#31363b");
   c.fillStyle = body;
-  roundRect(c, F.x, F.y, F.w, F.h, 24);
+  roundRect(c, F.x, F.y, F.w, F.h, 22);
   c.fill();
 
-  drawDoor(c, S, 0, "steak", "STEAK");
-  drawDoor(c, S, 1, "lobster", "LOBSTER");
+  for (let i = 0; i < SOURCES; i++) drawSource(c, S, i);
 
   // wooden plinth
   c.fillStyle = C.woodDark;
-  roundRect(c, F.x + 6, F.y + F.h - 14, F.w - 12, 20, 8);
+  roundRect(c, F.x + 6, F.y + F.h - 16, F.w - 12, 20, 8);
   c.fill();
   c.fillStyle = C.wood;
-  roundRect(c, F.x + 6, F.y + F.h - 14, F.w - 12, 12, 6);
+  roundRect(c, F.x + 6, F.y + F.h - 16, F.w - 12, 12, 6);
   c.fill();
 }
 
@@ -964,7 +1234,7 @@ function drawTray(c: Ctx, S: GameState): void {
   c.translate(shake, 0);
 
   c.fillStyle = "rgba(0,0,0,0.4)";
-  roundRect(c, T.x + 8, T.y + 16, T.w, T.h, 16);
+  roundRect(c, T.x + 8, T.y + 14, T.w, T.h, 16);
   c.fill();
 
   const g = c.createLinearGradient(0, T.y, 0, T.y + T.h);
@@ -985,23 +1255,22 @@ function drawTray(c: Ctx, S: GameState): void {
   }
   // front lip
   c.fillStyle = "rgba(0,0,0,0.28)";
-  roundRect(c, T.x, T.y + T.h - 14, T.w, 14, 8);
+  roundRect(c, T.x, T.y + T.h - 12, T.w, 12, 7);
   c.fill();
 
-  for (let i = 0; i < TRAY_CAP; i++) {
-    if (i < S.tray.length) continue;
-    c.setLineDash([7, 8]);
-    c.lineWidth = 3;
+  for (let i = S.tray.length; i < TRAY_CAP; i++) {
+    c.setLineDash([6, 7]);
+    c.lineWidth = 2.5;
     c.strokeStyle = "rgba(255,238,210,0.24)";
     c.beginPath();
-    c.ellipse(trayX(i), TRAY_Y + 6, 32, 20, 0, 0, Math.PI * 2);
+    c.ellipse(trayX(i), TRAY_Y + 6, 21, 14, 0, 0, Math.PI * 2);
     c.stroke();
     c.setLineDash([]);
   }
 
   if (full) {
     const pulse = 0.5 + 0.5 * Math.sin(S.t * 5);
-    txt(c, "TRAY FULL — tap an item to toss it", T.x + T.w / 2, T.y - 14, 22, `rgba(255,196,92,${0.55 + pulse * 0.45})`);
+    txt(c, "TRAY FULL — tap an item to toss it", T.x + T.w / 2, T.y - 12, 21, `rgba(255,196,92,${0.55 + pulse * 0.45})`);
   }
   c.restore();
 }
@@ -1014,12 +1283,12 @@ function drawLily(c: Ctx, S: GameState): void {
 
   c.fillStyle = "rgba(0,0,0,0.32)";
   c.beginPath();
-  c.ellipse(LILY_X, LILY_BASE + 6, 54, 13, 0, 0, Math.PI * 2);
+  c.ellipse(LILY_X, LILY_BASE + 6, 44, 11, 0, 0, Math.PI * 2);
   c.fill();
 
   c.save();
   c.translate(LILY_X, LILY_BASE - bob - cheer);
-  c.scale(0.94, 0.94);
+  c.scale(0.76, 0.76);
 
   c.fillStyle = "#3b4a63";
   roundRect(c, -26, -96, 20, 96, 9);
@@ -1130,23 +1399,25 @@ function drawLily(c: Ctx, S: GameState): void {
 
 /* --------------------------------------------------------------------- items */
 
+function glowHalo(c: Ctx, g: number, r: number, col: string): void {
+  if (g <= 0) return;
+  c.save();
+  c.globalCompositeOperation = "lighter";
+  const gl = c.createRadialGradient(0, 0, 4, 0, 0, r);
+  gl.addColorStop(0, col.replace("$A", String(0.45 * g)));
+  gl.addColorStop(1, col.replace("$A", "0"));
+  c.fillStyle = gl;
+  c.fillRect(-r, -r, r * 2, r * 2);
+  c.restore();
+}
+
 export function drawSteak(c: Ctx, it: Item): void {
   const s = it.scale * (1 + it.pop * 0.22);
   c.save();
   c.translate(it.x, it.y);
   c.rotate(it.rot);
   c.scale(s, s);
-
-  if (it.glow > 0) {
-    c.save();
-    c.globalCompositeOperation = "lighter";
-    const gl = c.createRadialGradient(0, 0, 4, 0, 0, 78);
-    gl.addColorStop(0, `rgba(255,200,90,${0.45 * it.glow})`);
-    gl.addColorStop(1, "rgba(255,180,60,0)");
-    c.fillStyle = gl;
-    c.fillRect(-90, -90, 180, 180);
-    c.restore();
-  }
+  glowHalo(c, it.glow, 78, "rgba(255,200,90,$A)");
 
   c.strokeStyle = "#c79a5f";
   c.lineWidth = 7;
@@ -1263,17 +1534,7 @@ export function drawLobster(c: Ctx, it: Item): void {
   c.translate(it.x, it.y);
   c.rotate(it.rot);
   c.scale(s, s);
-
-  if (it.glow > 0) {
-    c.save();
-    c.globalCompositeOperation = "lighter";
-    const gl = c.createRadialGradient(0, 0, 4, 0, 0, 84);
-    gl.addColorStop(0, `rgba(255,140,90,${0.45 * it.glow})`);
-    gl.addColorStop(1, "rgba(255,120,60,0)");
-    c.fillStyle = gl;
-    c.fillRect(-96, -96, 192, 192);
-    c.restore();
-  }
+  glowHalo(c, it.glow, 84, "rgba(255,140,90,$A)");
 
   c.strokeStyle = dark;
   c.lineWidth = 2.6;
@@ -1353,9 +1614,219 @@ export function drawLobster(c: Ctx, it: Item): void {
   c.restore();
 }
 
+/** Raw -> golden -> slightly over. Never burnt: the fryer is forgiving by design. */
+function fryTone(it: Item, raw: string, done: string, over: string): string {
+  if (it.cook < 1) return mixHex(raw, done, clamp01(it.cook * 1.1));
+  return mixHex(done, over, clamp01((it.past - GOLDEN) / 7));
+}
+
+export function drawFries(c: Ctx, it: Item): void {
+  const s = it.scale * (1 + it.pop * 0.22);
+  const body = fryTone(it, C.fryRaw, C.fryDone, C.fryOver);
+  const lite = mixHex(body, "#fff3cf", 0.45);
+  const dark = mixHex(body, "#5c3a0c", 0.4);
+  c.save();
+  c.translate(it.x, it.y);
+  c.rotate(it.rot);
+  c.scale(s, s);
+  glowHalo(c, it.glow, 74, "rgba(255,210,90,$A)");
+
+  const stick = (x: number, y: number, len: number, ang: number): void => {
+    c.save();
+    c.translate(x, y);
+    c.rotate(ang);
+    c.fillStyle = dark;
+    roundRect(c, -7, -len / 2, 14, len, 6);
+    c.fill();
+    c.fillStyle = body;
+    roundRect(c, -5.6, -len / 2 + 1, 11.2, len - 2, 5);
+    c.fill();
+    c.fillStyle = lite;
+    roundRect(c, -4, -len / 2 + 6, 3.4, Math.max(4, len - 16), 1.7);
+    c.fill();
+    c.restore();
+  };
+
+  // two laid across the back, then the upright bundle on top
+  stick(-7, 17, 60, 1.44);
+  stick(5, 24, 52, 1.26);
+  const N = 7;
+  for (let i = 0; i < N; i++) {
+    const t = (i / (N - 1)) * 2 - 1;
+    stick(t * 24, -4 + Math.abs(t) * 4, 76 - Math.abs(t) * 8, t * 0.2);
+  }
+  c.restore();
+}
+
+/** Seven-point wobble ring — reads as "hand-formed lump", not a circle. */
+function blob(c: Ctx, cx: number, cy: number, r: number, seed: number): void {
+  const n = 7;
+  const px: number[] = [];
+  const py: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const rr = r * (0.8 + rnd(seed + i * 1.7) * 0.4);
+    px.push(cx + Math.cos(a) * rr * 1.14);
+    py.push(cy + Math.sin(a) * rr * 0.88);
+  }
+  c.beginPath();
+  c.moveTo((px[0] + px[n - 1]) / 2, (py[0] + py[n - 1]) / 2);
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    c.quadraticCurveTo(px[i], py[i], (px[i] + px[j]) / 2, (py[i] + py[j]) / 2);
+  }
+  c.closePath();
+}
+
+export function drawNuggets(c: Ctx, it: Item): void {
+  const s = it.scale * (1 + it.pop * 0.22);
+  const body = fryTone(it, C.nugRaw, C.nugDone, C.nugOver);
+  const lite = mixHex(body, "#ffeec4", 0.4);
+  const dark = mixHex(body, "#4a2a08", 0.42);
+  c.save();
+  c.translate(it.x, it.y);
+  c.rotate(it.rot);
+  c.scale(s, s);
+  glowHalo(c, it.glow, 72, "rgba(255,190,90,$A)");
+
+  const spots: [number, number, number][] = [
+    [-20, -14, 1.3],
+    [20, -17, 2.6],
+    [-18, 16, 4.1],
+    [19, 14, 5.9],
+  ];
+  for (const [bx, by, seed] of spots) {
+    c.fillStyle = dark;
+    blob(c, bx, by + 2, 18, seed);
+    c.fill();
+    c.fillStyle = body;
+    blob(c, bx, by, 17.4, seed);
+    c.fill();
+    c.fillStyle = lite;
+    blob(c, bx - 3, by - 4, 8, seed + 0.6);
+    c.fill();
+    // craggy breading speckles
+    c.fillStyle = "rgba(90,52,12,0.28)";
+    for (let k = 0; k < 3; k++) {
+      c.beginPath();
+      c.arc(bx + (rnd(seed + k * 2.3) - 0.5) * 22, by + (rnd(seed + k * 5.1) - 0.5) * 18, 1.8, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+  c.restore();
+}
+
+export function drawDrink(c: Ctx, it: Item): void {
+  const s = it.scale * (1 + it.pop * 0.22);
+  const lemon = it.kind === "lemonade";
+  const [lite, deep] = lemon ? [C.lemon, C.lemonDeep] : [C.aqua, C.aquaDeep];
+  const fill = clamp01(it.cook);
+  c.save();
+  c.translate(it.x, it.y);
+  c.rotate(it.rot);
+  c.scale(s, s);
+  glowHalo(c, it.glow, 66, lemon ? "rgba(255,220,80,$A)" : "rgba(140,215,255,$A)");
+
+  // the tumbler outline, reused as the clip for the liquid
+  const glassPath = (): void => {
+    c.beginPath();
+    c.moveTo(-21, -32);
+    c.lineTo(21, -32);
+    c.lineTo(16, 28);
+    c.quadraticCurveTo(16, 32, 11, 32);
+    c.lineTo(-11, 32);
+    c.quadraticCurveTo(-16, 32, -16, 28);
+    c.closePath();
+  };
+
+  c.fillStyle = "rgba(0,0,0,0.28)";
+  c.beginPath();
+  c.ellipse(0, 34, 18, 5, 0, 0, Math.PI * 2);
+  c.fill();
+
+  glassPath();
+  c.fillStyle = "rgba(236,248,255,0.22)";
+  c.fill();
+
+  if (fill > 0.01) {
+    c.save();
+    glassPath();
+    c.clip();
+    const top = 30 - 60 * fill;
+    const g = c.createLinearGradient(0, top, 0, 32);
+    g.addColorStop(0, lite);
+    g.addColorStop(1, deep);
+    c.fillStyle = g;
+    c.fillRect(-22, top, 44, 32 - top);
+    // meniscus
+    c.fillStyle = "rgba(255,255,255,0.5)";
+    c.fillRect(-22, top, 44, 3);
+    // bubbles
+    c.fillStyle = lemon ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.55)";
+    for (let i = 0; i < 5; i++) {
+      const by = top + 6 + rnd(i * 4.3) * Math.max(2, 26 - top * 0.2);
+      if (by > 30) continue;
+      c.beginPath();
+      c.arc(-12 + rnd(i * 7.1) * 24, by, 1.6 + rnd(i) * 1.6, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.restore();
+  }
+
+  // glass body highlights + rim
+  glassPath();
+  c.strokeStyle = "rgba(255,255,255,0.7)";
+  c.lineWidth = 3;
+  c.stroke();
+  c.fillStyle = "rgba(255,255,255,0.4)";
+  roundRect(c, -15, -26, 5, 46, 2.5);
+  c.fill();
+  c.strokeStyle = "rgba(255,255,255,0.85)";
+  c.lineWidth = 3.5;
+  c.beginPath();
+  c.moveTo(-21, -32);
+  c.lineTo(21, -32);
+  c.stroke();
+
+  // a lemon wheel lands on the rim once the glass is full
+  if (lemon && fill >= 0.99) {
+    c.save();
+    c.translate(19, -33);
+    c.rotate(0.35);
+    c.fillStyle = "#fff6d0";
+    c.beginPath();
+    c.arc(0, 0, 10, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = C.lemon;
+    c.beginPath();
+    c.arc(0, 0, 7.6, 0, Math.PI * 2);
+    c.fill();
+    c.strokeStyle = "rgba(255,255,255,0.85)";
+    c.lineWidth = 1.4;
+    for (let i = 0; i < 6; i++) {
+      c.beginPath();
+      c.moveTo(0, 0);
+      c.lineTo(Math.cos((i / 6) * Math.PI * 2) * 7.4, Math.sin((i / 6) * Math.PI * 2) * 7.4);
+      c.stroke();
+    }
+    c.restore();
+  }
+  c.restore();
+}
+
 function drawItem(c: Ctx, it: Item): void {
-  if (it.kind === "steak") drawSteak(c, it);
-  else drawLobster(c, it);
+  switch (it.kind) {
+    case "steak":
+      return drawSteak(c, it);
+    case "lobster":
+      return drawLobster(c, it);
+    case "fries":
+      return drawFries(c, it);
+    case "nuggets":
+      return drawNuggets(c, it);
+    default:
+      return drawDrink(c, it);
+  }
 }
 
 /* ----------------------------------------------------------------- particles */
@@ -1390,6 +1861,13 @@ function drawParticles(c: Ctx, S: GameState): void {
         c.arc(p.x, p.y, p.size * (0.6 + k * 0.7), 0, Math.PI * 2);
         c.stroke();
         c.fillStyle = "rgba(220,245,255,0.28)";
+        c.fill();
+        break;
+      }
+      case "drop": {
+        c.fillStyle = p.col || "#ffd93b";
+        c.beginPath();
+        c.ellipse(p.x, p.y, p.size * 0.7, p.size * 1.3, 0, 0, Math.PI * 2);
         c.fill();
         break;
       }
@@ -1438,7 +1916,7 @@ function pill(c: Ctx, x: number, y: number, w: number, h: number, fill: string, 
 }
 
 function slotMeter(c: Ctx, it: Item, x: number, y: number, t: number): void {
-  const w = 116;
+  const w = 112;
   const h = 20;
   const left = x - w / 2;
   if (it.awaitFlip) {
@@ -1448,6 +1926,12 @@ function slotMeter(c: Ctx, it: Item, x: number, y: number, t: number): void {
     return;
   }
   if (it.cook >= 1) {
+    // fryer items slide from golden to "over" — still edible, just no bonus
+    if (it.past > GOLDEN) {
+      pill(c, left, y - h / 2, w, h, "rgba(198,140,66,0.92)", "rgba(255,220,170,0.6)");
+      txt(c, "OVER", x, y + 1, 16, "#3b1e05");
+      return;
+    }
     const pulse = 0.55 + 0.45 * Math.abs(Math.sin(t * 5));
     pill(c, left, y - h / 2, w, h, `rgba(90,200,120,${0.6 + pulse * 0.4})`, "rgba(255,255,255,0.8)");
     txt(c, "TAP!", x, y + 1, 17, "#0f3d22");
@@ -1471,9 +1955,11 @@ function slotMeter(c: Ctx, it: Item, x: number, y: number, t: number): void {
 function drawMeters(c: Ctx, S: GameState): void {
   for (let i = 0; i < SLOTS; i++) {
     const g = S.grill[i];
-    if (g && !g.tween) slotMeter(c, g, slotX(i), GRILL_METER_Y, S.t);
+    if (g && !g.tween) slotMeter(c, g, grillSlot(i).x, cookMeterY(i), S.t);
     const p = S.pot[i];
-    if (p && !p.tween) slotMeter(c, p, slotX(i), POT_METER_Y, S.t);
+    if (p && !p.tween) slotMeter(c, p, potSlot(i).x, cookMeterY(i), S.t);
+    const f = S.fryer[i];
+    if (f && !f.tween) slotMeter(c, f, fryerSlot(i).x, fryMeterY(i), S.t);
   }
 }
 
@@ -1486,10 +1972,10 @@ function drawHud(c: Ctx, S: GameState, muted: boolean): void {
   c.fillStyle = g;
   c.fillRect(-40, -40, DW + 80, 156);
 
-  shadowTxt(c, "SCORE", 30, 50, 17, "rgba(255,220,170,0.75)", "left");
-  shadowTxt(c, String(S.score), 30, 80, 34, C.gold, "left");
-  shadowTxt(c, "BEST", 600, 50, 17, "rgba(255,220,170,0.75)", "right");
-  shadowTxt(c, String(S.best), 600, 80, 34, C.cream, "right");
+  shadowTxt(c, "SCORE", 30, 48, 17, "rgba(255,220,170,0.75)", "left");
+  shadowTxt(c, String(S.score), 30, 78, 34, C.gold, "left");
+  shadowTxt(c, "BEST", 600, 48, 17, "rgba(255,220,170,0.75)", "right");
+  shadowTxt(c, String(S.best), 600, 78, 34, C.cream, "right");
 
   const m = MUTE_BTN;
   c.fillStyle = "rgba(255,235,205,0.14)";
@@ -1529,7 +2015,7 @@ function drawToast(c: Ctx, S: GameState): void {
   const k = clamp01(S.toast.t / 1.2);
   c.save();
   c.globalAlpha = k > 0.7 ? (1 - k) / 0.3 : Math.min(1, k * 4);
-  shadowTxt(c, S.toast.text, DW / 2, 760 - (1 - k) * 34, 46, C.gold);
+  shadowTxt(c, S.toast.text, DW / 2, 470 - (1 - k) * 34, 44, C.gold);
   c.restore();
 }
 
@@ -1537,12 +2023,16 @@ function drawToast(c: Ctx, S: GameState): void {
 
 const TIPS: { text: string; target: Rect }[] = [
   {
-    text: "Tap the fridge — steak jumps on the grill, lobster drops in the pot. Four of each at once!",
+    text: "Tap the pantry — every item jumps straight to its own station. Six to choose from!",
     target: { x: FRIDGE.x, y: FRIDGE.y, w: FRIDGE.w, h: FRIDGE.h },
   },
   {
+    text: "New: fries + nuggets in the fryer, lemonade + water at the drink maker.",
+    target: { x: FRYER.x - 6, y: FRYER.y - 8, w: DRINKS.x + DRINKS.w - FRYER.x + 12, h: FRYER.h + 16 },
+  },
+  {
     text: "Flip a steak when it flashes FLIP, then tap anything glowing to plate it on the tray.",
-    target: { x: GRILL.x - 8, y: GRILL.y, w: GRILL.w + 16, h: POT.y + POT.h - GRILL.y },
+    target: { x: GRILL.x - 6, y: GRILL.y - 8, w: POT.x + POT.w - GRILL.x + 12, h: GRILL.h + 16 },
   },
   {
     text: "Feed the family exactly what the order card asks — before the timer runs out!",
@@ -1572,9 +2062,9 @@ function drawTips(c: Ctx, S: GameState): void {
   c.setLineDash([]);
 
   // callout — sits opposite the highlight so it never covers it
-  const above = r.y > DH / 2;
-  const bh = 250;
-  const by = above ? r.y - bh - 40 : r.y + r.h + 40;
+  const bh = 240;
+  const above = r.y > bh + 90;
+  const by = above ? r.y - bh - 34 : r.y + r.h + 34;
   const bx = 60;
   const bw = DW - 120;
   c.fillStyle = "rgba(0,0,0,0.45)";
@@ -1591,9 +2081,9 @@ function drawTips(c: Ctx, S: GameState): void {
   roundRect(c, bx + 10, by + 10, bw - 20, bh - 20, 18);
   c.stroke();
 
-  txt(c, `TIP ${S.tip + 1} of ${TIPS.length}`, DW / 2, by + 46, 22, "#a97542");
-  wrapText(c, tip.text, DW / 2, by + 98, bw - 76, 36, 30, "#8a3a12");
-  txt(c, "tap to continue →", DW / 2, by + bh - 34, 24, C.red);
+  txt(c, `TIP ${S.tip + 1} of ${TIPS.length}`, DW / 2, by + 44, 22, "#a97542");
+  wrapText(c, tip.text, DW / 2, by + 94, bw - 76, 36, 30, "#8a3a12");
+  txt(c, "tap to continue →", DW / 2, by + bh - 32, 24, C.red);
   c.restore();
 }
 
@@ -1658,11 +2148,12 @@ function drawPopup(c: Ctx, S: GameState): void {
   c.stroke();
 
   if (start) {
-    shadowTxt(c, "LILY'S", DW / 2, y + 92, 46, C.red);
-    shadowTxt(c, "ISLAND GRILL", DW / 2, y + 146, 46, C.red);
-    txt(c, "— ARCADE RUSH —", DW / 2, y + 200, 25, "#a97542", "center", 800);
-    icon(c, "steak", DW / 2 - 96, y + 274, 0.86);
-    icon(c, "lobster", DW / 2 + 96, y + 274, 0.72);
+    shadowTxt(c, "LILY'S", DW / 2, y + 88, 46, C.red);
+    shadowTxt(c, "ISLAND GRILL", DW / 2, y + 142, 46, C.red);
+    txt(c, "— ARCADE RUSH —", DW / 2, y + 194, 25, "#a97542", "center", 800);
+    for (let i = 0; i < KINDS.length; i++) {
+      icon(c, KINDS[i], DW / 2 + (i - 2.5) * 88, y + 268, 0.5);
+    }
     txt(c, `BEST  ${S.best}`, DW / 2, y + 348, 26, "#a97542", "center", 800);
   } else {
     shadowTxt(c, "Time's up!", DW / 2, y + 96, 56, C.red);
@@ -1704,12 +2195,13 @@ export function render(c: Ctx, S: GameState, muted: boolean): void {
 
   drawBackdrop(c);
   drawPlants(c, S);
-  drawRibs(c, S, 14, 92, 2, 150);
-  drawRibs(c, S, 628, 706, 2, 150);
+  drawRibs(c, S, 14, 92, 2, 148);
+  drawRibs(c, S, 628, 706, 2, 148);
 
   drawFamily(c, S);
   drawHearts(c, S);
   drawOrderCard(c, S);
+  drawLily(c, S);
 
   drawGrillBody(c, S);
   drawFlamesBack(c, S);
@@ -1726,8 +2218,19 @@ export function render(c: Ctx, S: GameState, muted: boolean): void {
   }
   drawPotFront(c, S);
 
-  drawLily(c, S);
-  drawFridge(c, S);
+  drawFryer(c, S);
+  for (let i = 0; i < SLOTS; i++) {
+    const it = S.fryer[i];
+    if (it && !it.tween) drawItem(c, it);
+  }
+
+  drawDrinkMaker(c, S);
+  for (let i = 0; i < DRINK_SLOTS; i++) {
+    const it = S.drinks[i];
+    if (it && !it.tween) drawItem(c, it);
+  }
+
+  drawPantry(c, S);
   drawTray(c, S);
   for (const it of S.tray) if (!it.tween) drawItem(c, it);
 
@@ -1735,11 +2238,8 @@ export function render(c: Ctx, S: GameState, muted: boolean): void {
 
   // everything mid-flight rides above the scene
   for (const it of S.tray) if (it.tween) drawItem(c, it);
-  for (let i = 0; i < SLOTS; i++) {
-    const g = S.grill[i];
-    if (g && g.tween) drawItem(c, g);
-    const p = S.pot[i];
-    if (p && p.tween) drawItem(c, p);
+  for (const arr of [S.grill, S.pot, S.fryer, S.drinks]) {
+    for (const it of arr) if (it && it.tween) drawItem(c, it);
   }
   for (const it of S.flying) drawItem(c, it);
 

@@ -139,6 +139,17 @@ export function sfxSparkle(): void {
   tone(1400 + Math.random() * 900, 0.22, "sine", 0.08);
 }
 
+/** Oil catching the basket — a shorter, fatter sizzle than the grill's. */
+export function sfxFry(intensity = 1): void {
+  noise(0.2 + Math.random() * 0.12, 0.07 * intensity, 1300 + Math.random() * 1400, 0.7);
+}
+
+/** Glass filling up — a rising gurgle that lands right about when the pour ends. */
+export function sfxPour(): void {
+  noise(0.85, 0.09, 700, 1.6, 0, 1900);
+  tone(300, 0.8, "sine", 0.09, 0, 620);
+}
+
 /** Soft "that station is full" bonk — a closed door, not a buzzer. */
 export function sfxBonk(): void {
   tone(190, 0.13, "sine", 0.2, 0, 120);

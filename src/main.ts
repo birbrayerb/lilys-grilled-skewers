@@ -1,29 +1,41 @@
-import { MUTE_BTN, POPUP_BTN, TIP_COUNT, render } from "./art.ts";
+import { MUTE_BTN, POPUP_BTN, TIP_COUNT, kscale, render } from "./art.ts";
 import {
   DH,
+  DRINKS,
+  DRINK_SLOTS,
   DW,
+  FRYER,
   GRILL,
-  GRILL_SLOT_Y,
   HIT,
+  OIL_Y0,
   POT,
-  POT_SLOT_Y,
   SLOTS,
+  SOURCES,
   TABLE,
   TRAY_CAP,
   TRAY_Y,
   clamp01,
-  doorHit,
-  doorItem,
+  drinkHit,
+  drinkSlot,
   ease,
+  fryerHit,
+  fryerSlot,
   grillHit,
+  grillSlot,
   hit,
   lerp,
   potHit,
-  slotX,
+  potSlot,
+  srcHit,
+  srcItem,
   trayHit,
   trayX,
 } from "./layout.ts";
 import {
+  GOLDEN,
+  KINDS,
+  isDrink,
+  isFried,
   loadBest,
   makeOrder,
   markTipsSeen,
@@ -45,8 +57,10 @@ import {
   sfxCheer,
   sfxDing,
   sfxFlip,
+  sfxFry,
   sfxNudge,
   sfxPickup,
+  sfxPour,
   sfxSizzle,
   sfxSparkle,
   sfxThunk,
@@ -54,20 +68,22 @@ import {
   unlockAudio,
 } from "./audio.ts";
 
-const STEAK_COOK_SECONDS = 5.2;
-const LOBSTER_COOK_SECONDS = 4.4;
+const COOK_SECONDS: Record<Kind, number> = {
+  steak: 5.2,
+  lobster: 4.4,
+  fries: 3.6,
+  nuggets: 4.2,
+  lemonade: 1,
+  water: 1,
+};
 /** Flip window, in cook progress. Miss it and the steak still cooks — just no bonus. */
 const FLIP_FROM = 0.44;
 const FLIP_TO = 0.62;
 
-const SCALE = {
-  born: 0.34,
-  grill: 0.62,
-  pot: 0.46,
-  traySteak: 0.5,
-  trayLobster: 0.4,
-  plate: 0.42,
-};
+/** Base scales per context; kscale() folds in the per-kind size correction. */
+const SCALE = { born: 0.3, grill: 0.62, pot: 0.62, fry: 0.68, drink: 0.82, tray: 0.36, plate: 0.34 };
+
+type Station = "grill" | "pot" | "fryer" | "drinks";
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const c = canvas.getContext("2d", { alpha: false }) as CanvasRenderingContext2D;
@@ -91,6 +107,33 @@ function resize(): void {
 }
 
 let S: GameState = newState(0, loadBest());
+
+/* ------------------------------------------------------------------ stations */
+
+function stationOf(kind: Kind): Station {
+  if (kind === "steak") return "grill";
+  if (kind === "lobster") return "pot";
+  if (isDrink(kind)) return "drinks";
+  return "fryer";
+}
+
+function slots(st: Station): (Item | null)[] {
+  return st === "grill" ? S.grill : st === "pot" ? S.pot : st === "fryer" ? S.fryer : S.drinks;
+}
+
+function slotPos(st: Station, i: number): { x: number; y: number } {
+  return st === "grill"
+    ? grillSlot(i)
+    : st === "pot"
+      ? potSlot(i)
+      : st === "fryer"
+        ? fryerSlot(i)
+        : drinkSlot(i);
+}
+
+function slotScale(st: Station, kind: Kind): number {
+  return kscale(kind, st === "grill" ? SCALE.grill : st === "pot" ? SCALE.pot : st === "fryer" ? SCALE.fry : SCALE.drink);
+}
 
 /* ------------------------------------------------------------------ tweening */
 
@@ -127,16 +170,25 @@ function stepTween(it: Item, dt: number): void {
 
 /* ---------------------------------------------------------------- particles */
 
-function emit(kind: PKind, x: number, y: number, vx: number, vy: number, size: number, life: number): void {
-  if (S.particles.length > 260) return;
-  S.particles.push({ kind, x, y, vx, vy, life: 0, max: life, size, rot: Math.random() * Math.PI * 2 });
+function emit(
+  kind: PKind,
+  x: number,
+  y: number,
+  vx: number,
+  vy: number,
+  size: number,
+  life: number,
+  col = "",
+): void {
+  if (S.particles.length > 300) return;
+  S.particles.push({ kind, x, y, vx, vy, life: 0, max: life, size, rot: Math.random() * Math.PI * 2, col });
 }
 
-function burst(kind: PKind, x: number, y: number, n: number, spread: number, size: number): void {
+function burst(kind: PKind, x: number, y: number, n: number, spread: number, size: number, col = ""): void {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const s = Math.random() * spread;
-    emit(kind, x, y, Math.cos(a) * s, Math.sin(a) * s - 40, size * (0.6 + Math.random() * 0.8), 1 + Math.random());
+    emit(kind, x, y, Math.cos(a) * s, Math.sin(a) * s - 40, size * (0.6 + Math.random() * 0.8), 1 + Math.random(), col);
   }
 }
 
@@ -146,34 +198,49 @@ function toast(text: string): void {
 
 /* ------------------------------------------------------------------- actions */
 
-function stationOf(kind: Kind): (Item | null)[] {
-  return kind === "steak" ? S.grill : S.pot;
+function blockSrc(src: number, msg: string): void {
+  S.srcFull[src] = 1;
+  S.srcMsg[src] = msg;
+  sfxBonk();
 }
 
-/** Fridge tap — send one raw item to the next free slot of its station. */
-function addItem(kind: Kind): void {
-  const arr = stationOf(kind);
-  const d = kind === "steak" ? 0 : 1;
-  const i = arr.indexOf(null);
-  if (i < 0) {
-    S.doorFull[d] = 1;
-    sfxBonk();
+/** Pantry tap — send one raw item to the next free slot of its station. */
+function addItem(src: number): void {
+  const kind = KINDS[src];
+  const st = stationOf(kind);
+  const arr = slots(st);
+  // Drinks pour straight to the tray, so a full tray has to stop them at the source.
+  if (S.tray.length >= TRAY_CAP) {
+    blockSrc(src, "TRAY FULL");
+    S.trayShake = 1;
     return;
   }
-  S.doorFlash[d] = 1;
-  const from = doorItem(d);
-  const it = newItem(kind, from.x, from.y, SCALE.born);
+  // Each spout owns one pour position; everything else takes the next free slot.
+  const fixed = kind === "lemonade" ? 0 : kind === "water" ? 1 : -1;
+  const i = fixed >= 0 ? (arr[fixed] ? -1 : fixed) : arr.indexOf(null);
+  if (i < 0) {
+    blockSrc(src, "FULL");
+    return;
+  }
+
+  S.srcFlash[src] = 1;
+  const from = srcItem(src);
+  const it = newItem(kind, from.x, from.y, kscale(kind, SCALE.born));
   arr[i] = it;
   sfxPickup();
-  const tx = slotX(i);
-  const ty = kind === "steak" ? GRILL_SLOT_Y : POT_SLOT_Y;
-  move(it, tx, ty, kind === "steak" ? SCALE.grill : SCALE.pot, 0.46, 300, 0, () => {
-    if (kind === "steak") {
+  const to = slotPos(st, i);
+  move(it, to.x, to.y, slotScale(st, kind), 0.46, 300, 0, () => {
+    if (st === "grill") {
       sfxSizzle(1.4);
-      burst("puff", tx, ty - 10, 7, 60, 12);
-    } else {
+      burst("puff", to.x, to.y - 10, 7, 60, 12);
+    } else if (st === "pot") {
       sfxBubble();
-      burst("bubble", tx, ty - 20, 8, 60, 6);
+      burst("bubble", to.x, to.y - 20, 8, 60, 6);
+    } else if (st === "fryer") {
+      sfxFry();
+      burst("bubble", to.x, to.y - 14, 9, 70, 5);
+    } else {
+      sfxPour();
     }
   });
 }
@@ -191,22 +258,25 @@ function flip(it: Item): void {
 }
 
 /** Lift a finished item onto the shared serving tray. */
-function plate(arr: (Item | null)[], i: number): void {
+function plate(arr: (Item | null)[], i: number): boolean {
   const it = arr[i];
-  if (!it) return;
+  if (!it) return false;
   if (S.tray.length >= TRAY_CAP) {
     S.trayShake = 1;
     sfxBonk();
-    return;
+    return false;
   }
+  // Fryer baskets are worth the small bonus only while they are still golden.
+  if (isFried(it.kind)) it.perfect = it.past <= GOLDEN;
   const idx = S.tray.length;
   arr[i] = null;
   S.tray.push(it);
   it.glow = 0;
   sfxPickup();
-  move(it, trayX(idx), TRAY_Y, it.kind === "steak" ? SCALE.traySteak : SCALE.trayLobster, 0.42, 210, 0, () => {
+  move(it, trayX(idx), TRAY_Y, kscale(it.kind, SCALE.tray), 0.42, 210, 0, () => {
     sfxThunk();
   });
+  return true;
 }
 
 function relayoutTray(): void {
@@ -239,29 +309,39 @@ function discard(i: number): void {
 
 function deliver(): void {
   const o = S.order;
-  const steaks = S.tray.filter((i) => i.kind === "steak");
-  const lobsters = S.tray.filter((i) => i.kind === "lobster");
-  if (steaks.length < o.steak || lobsters.length < o.lobster) {
-    S.shake = 1;
-    sfxNudge();
-    toast("Still hungry!");
-    return;
+  const have: Record<string, Item[]> = {};
+  for (const k of KINDS) have[k] = [];
+  for (const it of S.tray) have[it.kind].push(it);
+
+  for (const k of KINDS) {
+    if (have[k].length < o.need[k]) {
+      S.shake = 1;
+      sfxNudge();
+      toast("Still hungry!");
+      return;
+    }
   }
 
-  // Spend perfectly-flipped steaks first so the player always banks the bonus.
-  steaks.sort((a, b) => Number(b.perfect) - Number(a.perfect));
-  const used = steaks.slice(0, o.steak).concat(lobsters.slice(0, o.lobster));
-  const perfects = used.filter((i) => i.kind === "steak" && i.perfect).length;
+  // Spend perfectly-cooked items first so the player always banks the bonus.
+  const used: Item[] = [];
+  for (const k of KINDS) {
+    if (!o.need[k]) continue;
+    have[k].sort((a, b) => Number(b.perfect) - Number(a.perfect));
+    used.push(...have[k].slice(0, o.need[k]));
+  }
+  const perfects = used.filter((i) => i.perfect).length;
   const secs = Math.max(0, Math.floor(o.left));
-  const gained = 10 * (o.steak + o.lobster) + 2 * perfects + secs;
+  let gained = 10 * o.total + 2 * perfects + secs;
+  if (o.variety) gained += 15;
 
   S.tray = S.tray.filter((i) => !used.includes(i));
   relayoutTray();
 
   used.forEach((it, k) => {
     S.flying.push(it);
-    const px = TABLE.x + 74 + (k % 3) * 110;
-    move(it, px, TABLE.y + 10, SCALE.plate, 0.5 + k * 0.05, 260, 0, () => {
+    const px = TABLE.x + 74 + (k % 3) * 110 + ((k / 3) | 0) * 6;
+    const py = TABLE.y + 10 - ((k / 3) | 0) * 7;
+    move(it, px, py, kscale(it.kind, SCALE.plate), 0.5 + k * 0.04, 260, 0, () => {
       sfxSparkle();
       burst("sparkle", it.x, it.y, 8, 110, 9);
       const at = S.flying.indexOf(it);
@@ -280,11 +360,11 @@ function deliver(): void {
   }
   sfxWhoosh();
   sfxCheer();
-  toast(`+${gained}!`);
+  toast(o.variety ? `+${gained}!  ★ ALL SIX ★` : `+${gained}!`);
   for (let i = 0; i < 12; i++) {
-    emit("heart", 240 + Math.random() * 240, 460 + Math.random() * 40, (Math.random() - 0.5) * 50, -80 - Math.random() * 60, 11 + Math.random() * 8, 2);
+    emit("heart", 240 + Math.random() * 240, 440 + Math.random() * 40, (Math.random() - 0.5) * 50, -80 - Math.random() * 60, 11 + Math.random() * 8, 2);
   }
-  burst("sparkle", 360, 470, 24, 200, 11);
+  burst("sparkle", 360, 452, 24, 200, 11);
 
   S.order = makeOrder(o.n + 1);
 }
@@ -345,31 +425,27 @@ function tap(x: number, y: number): void {
   }
 
   for (let i = 0; i < SLOTS; i++) {
-    if (hit(grillHit(i), x, y)) {
-      tapSlot(S.grill, i);
-      return;
-    }
-    if (hit(potHit(i), x, y)) {
-      tapSlot(S.pot, i);
+    if (hit(grillHit(i), x, y)) return tapSlot(S.grill, i);
+    if (hit(potHit(i), x, y)) return tapSlot(S.pot, i);
+    if (hit(fryerHit(i), x, y)) return tapSlot(S.fryer, i);
+  }
+
+  // The spouts double as their own source buttons — tap the machine or the pantry, same pour.
+  for (let i = 0; i < DRINK_SLOTS; i++) {
+    if (hit(drinkHit(i), x, y)) {
+      if (S.drinks[i]) tapSlot(S.drinks, i);
+      else addItem(i === 0 ? 4 : 5);
       return;
     }
   }
 
-  if (hit(doorHit(0), x, y)) {
-    addItem("steak");
-    return;
-  }
-  if (hit(doorHit(1), x, y)) {
-    addItem("lobster");
-    return;
+  for (let i = 0; i < SOURCES; i++) {
+    if (hit(srcHit(i), x, y)) return addItem(i);
   }
 
   if (S.tray.length >= TRAY_CAP) {
     for (let i = 0; i < S.tray.length; i++) {
-      if (hit(trayHit(i), x, y)) {
-        discard(i);
-        return;
-      }
+      if (hit(trayHit(i), x, y)) return discard(i);
     }
   }
   // anything else is a harmless no-op
@@ -379,10 +455,10 @@ function tap(x: number, y: number): void {
 
 const sizzleAcc = [0, 0, 0, 0];
 const bubbleAcc = [0, 0, 0, 0];
+const fryAcc = [0, 0, 0, 0];
 let emberAcc = 0;
 
-function cookStation(arr: (Item | null)[], dt: number, kind: Kind): void {
-  const seconds = kind === "steak" ? STEAK_COOK_SECONDS : LOBSTER_COOK_SECONDS;
+function cookStation(arr: (Item | null)[], dt: number, st: Station): void {
   let cooking = 0;
   for (const it of arr) if (it && !it.tween && it.cook < 1) cooking++;
   const vol = cooking > 0 ? 1 / Math.sqrt(cooking) : 1;
@@ -393,9 +469,9 @@ function cookStation(arr: (Item | null)[], dt: number, kind: Kind): void {
 
     if (it.cook < 1) {
       const was = it.cook;
-      it.cook = Math.min(1, it.cook + dt / seconds);
+      it.cook = Math.min(1, it.cook + dt / COOK_SECONDS[it.kind]);
 
-      if (kind === "steak" && !it.flipped) {
+      if (st === "grill" && !it.flipped) {
         if (was < FLIP_FROM && it.cook >= FLIP_FROM) {
           it.awaitFlip = true;
           sfxDing();
@@ -416,7 +492,7 @@ function cookStation(arr: (Item | null)[], dt: number, kind: Kind): void {
         S.lilyBob = 6;
       }
 
-      if (kind === "steak") {
+      if (st === "grill") {
         sizzleAcc[i] += dt;
         // staggered per slot so four grills crackle instead of pulsing in lockstep
         if (sizzleAcc[i] > 0.26 + i * 0.04) {
@@ -424,7 +500,7 @@ function cookStation(arr: (Item | null)[], dt: number, kind: Kind): void {
           sfxSizzle(vol);
           emit("puff", it.x + (Math.random() - 0.5) * 60, it.y - 6, (Math.random() - 0.5) * 16, -46 - Math.random() * 26, 7 + Math.random() * 6, 1.2);
         }
-      } else {
+      } else if (st === "pot") {
         bubbleAcc[i] += dt;
         if (bubbleAcc[i] > 0.2) {
           bubbleAcc[i] = 0;
@@ -434,9 +510,24 @@ function cookStation(arr: (Item | null)[], dt: number, kind: Kind): void {
             emit("steam", it.x + (Math.random() - 0.5) * 60, it.y - 26, (Math.random() - 0.5) * 14, -40 - Math.random() * 22, 8 + Math.random() * 6, 1.4);
           }
         }
+      } else if (st === "fryer") {
+        fryAcc[i] += dt;
+        if (fryAcc[i] > 0.22 + i * 0.03) {
+          fryAcc[i] = 0;
+          if (Math.random() < 0.25) sfxFry();
+          emit("bubble", it.x + (Math.random() - 0.5) * 56, it.y + 6, (Math.random() - 0.5) * 12, -30 - Math.random() * 20, 3 + Math.random() * 4, 0.7);
+        }
+      } else {
+        // pouring — a little colour drips into the drip tray
+        if (Math.random() < dt * 14) {
+          emit("drop", it.x + (Math.random() - 0.5) * 12, it.y - 18, 0, 90 + Math.random() * 40, 3 + Math.random() * 2, 0.5, it.kind === "lemonade" ? "#ffd93b" : "#9fdcf2");
+        }
       }
     } else {
+      it.past += dt;
       it.glow = 0.55 + 0.45 * Math.abs(Math.sin(S.t * 4 + i));
+      // A poured drink walks itself to the tray — drinks are the easy filler.
+      if (st === "drinks" && S.tray.length < TRAY_CAP) plate(arr, i);
     }
   }
 }
@@ -450,30 +541,33 @@ function update(dt: number): void {
 
   S.ignite += ((S.phase === "over" ? 0.35 : 1) - S.ignite) * Math.min(1, dt * 1.6);
   S.potBoil += (1 - S.potBoil) * Math.min(1, dt * 2);
+  S.fryHeat += (1 - S.fryHeat) * Math.min(1, dt * 2);
   S.shake = Math.max(0, S.shake - dt * 2.6);
   S.overShake = Math.max(0, S.overShake - dt * 1.6);
   S.trayShake = Math.max(0, S.trayShake - dt * 3);
   S.cheer = Math.max(0, S.cheer - dt * 0.55);
   S.lilyBob = Math.max(0, S.lilyBob - dt * 20);
-  S.doorFlash[0] = Math.max(0, S.doorFlash[0] - dt * 4);
-  S.doorFlash[1] = Math.max(0, S.doorFlash[1] - dt * 4);
-  S.doorFull[0] = Math.max(0, S.doorFull[0] - dt * 2.4);
-  S.doorFull[1] = Math.max(0, S.doorFull[1] - dt * 2.4);
+  for (let i = 0; i < SOURCES; i++) {
+    S.srcFlash[i] = Math.max(0, S.srcFlash[i] - dt * 4);
+    S.srcFull[i] = Math.max(0, S.srcFull[i] - dt * 2.4);
+  }
   S.happy += (clamp01(S.served / 10) - S.happy) * Math.min(1, dt * 3);
 
-  for (const arr of [S.grill, S.pot]) {
+  for (const arr of [S.grill, S.pot, S.fryer, S.drinks]) {
     for (const it of arr) if (it) stepTween(it, dt);
   }
   for (const it of S.tray) stepTween(it, dt);
   for (let i = S.flying.length - 1; i >= 0; i--) stepTween(S.flying[i], dt);
 
-  for (const arr of [S.grill, S.pot, S.tray, S.flying]) {
+  for (const arr of [S.grill, S.pot, S.fryer, S.drinks, S.tray, S.flying]) {
     for (const it of arr) if (it) it.pop = Math.max(0, it.pop - dt * 3);
   }
 
   if (live) {
-    cookStation(S.grill, dt, "steak");
-    cookStation(S.pot, dt, "lobster");
+    cookStation(S.grill, dt, "grill");
+    cookStation(S.pot, dt, "pot");
+    cookStation(S.fryer, dt, "fryer");
+    cookStation(S.drinks, dt, "drinks");
     S.order.left -= dt;
     if (S.order.left <= 0) {
       S.order.left = 0;
@@ -485,10 +579,13 @@ function update(dt: number): void {
   emberAcc += dt;
   if (emberAcc > 0.06) {
     emberAcc = 0;
-    emit("ember", GRILL.x + 20 + Math.random() * (GRILL.w - 40), 640, (Math.random() - 0.5) * 26, -90 - Math.random() * 80, 2.5 + Math.random() * 3.5, 1 + Math.random() * 0.8);
+    emit("ember", GRILL.x + 20 + Math.random() * (GRILL.w - 40), 636, (Math.random() - 0.5) * 26, -90 - Math.random() * 80, 2.5 + Math.random() * 3.5, 1 + Math.random() * 0.8);
   }
-  if (Math.random() < dt * 6) {
-    emit("steam", POT.x + 60 + Math.random() * (POT.w - 120), POT.y + 20, (Math.random() - 0.5) * 14, -34 - Math.random() * 20, 7 + Math.random() * 6, 1.4);
+  if (Math.random() < dt * 5) {
+    emit("steam", POT.x + 60 + Math.random() * (POT.w - 120), POT.y + 60, (Math.random() - 0.5) * 14, -34 - Math.random() * 20, 7 + Math.random() * 6, 1.4);
+  }
+  if (Math.random() < dt * 4) {
+    emit("bubble", FRYER.x + 40 + Math.random() * (FRYER.w - 80), OIL_Y0 + 20 + Math.random() * 140, (Math.random() - 0.5) * 8, -18 - Math.random() * 14, 2.5 + Math.random() * 3, 0.8);
   }
 
   for (let i = S.particles.length - 1; i >= 0; i--) {
@@ -508,6 +605,8 @@ function update(dt: number): void {
       p.vx += Math.sin(S.t * 2 + p.rot) * 14 * dt;
     } else if (p.kind === "bubble") {
       p.vy -= 18 * dt;
+    } else if (p.kind === "drop") {
+      p.vy += 260 * dt;
     } else if (p.kind === "heart" || p.kind === "sparkle") {
       p.vy += 18 * dt;
     }
@@ -580,10 +679,22 @@ if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__dev = {
     tap,
     state: () => S,
-    step(seconds: number, fps = 60) {
+    makeOrder,
+    hits: {
+      family: HIT.family,
+      grill: grillHit,
+      pot: potHit,
+      fryer: fryerHit,
+      drink: drinkHit,
+      src: srcHit,
+      tray: trayHit,
+      popup: POPUP_BTN,
+      drinks: DRINKS,
+    },
+    step(seconds: number, fps = 60, paint = true) {
       const dt = 1 / fps;
       for (let i = 0; i < Math.round(seconds * fps); i++) update(dt);
-      draw();
+      if (paint) draw();
     },
   };
 }
