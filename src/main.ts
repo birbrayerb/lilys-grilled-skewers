@@ -1,28 +1,46 @@
-import { MUTE_BTN, POPUP_BTN, render } from "./art.ts";
+import { MUTE_BTN, POPUP_BTN, TIP_COUNT, render } from "./art.ts";
 import {
   DH,
   DW,
   GRILL,
+  GRILL_SLOT_Y,
   HIT,
-  P,
   POT,
+  POT_SLOT_Y,
+  SLOTS,
+  TABLE,
+  TRAY_CAP,
+  TRAY_Y,
   clamp01,
+  doorHit,
+  doorItem,
   ease,
+  grillHit,
   hit,
   lerp,
-  type Rect,
+  potHit,
+  slotX,
+  trayHit,
+  trayX,
 } from "./layout.ts";
 import {
   loadBest,
+  makeOrder,
+  markTipsSeen,
+  newItem,
   newState,
   saveBest,
+  tipsSeen,
   type GameState,
   type Item,
+  type Kind,
   type PKind,
 } from "./state.ts";
 import {
   isMuted,
   setMuted,
+  sfxAww,
+  sfxBonk,
   sfxBubble,
   sfxCheer,
   sfxDing,
@@ -36,8 +54,20 @@ import {
   unlockAudio,
 } from "./audio.ts";
 
-const STEAK_COOK_SECONDS = 5.4;
-const LOBSTER_COOK_SECONDS = 4.6;
+const STEAK_COOK_SECONDS = 5.2;
+const LOBSTER_COOK_SECONDS = 4.4;
+/** Flip window, in cook progress. Miss it and the steak still cooks — just no bonus. */
+const FLIP_FROM = 0.44;
+const FLIP_TO = 0.62;
+
+const SCALE = {
+  born: 0.34,
+  grill: 0.62,
+  pot: 0.46,
+  traySteak: 0.5,
+  trayLobster: 0.4,
+  plate: 0.42,
+};
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const c = canvas.getContext("2d", { alpha: false }) as CanvasRenderingContext2D;
@@ -74,19 +104,7 @@ function move(
   spin: number,
   done: () => void,
 ): void {
-  it.tween = {
-    fx: it.x,
-    fy: it.y,
-    tx,
-    ty,
-    fs: it.scale,
-    ts,
-    arc,
-    spin,
-    t: 0,
-    dur,
-    done,
-  };
+  it.tween = { fx: it.x, fy: it.y, tx, ty, fs: it.scale, ts, arc, spin, t: 0, dur, done };
 }
 
 function stepTween(it: Item, dt: number): void {
@@ -110,18 +128,8 @@ function stepTween(it: Item, dt: number): void {
 /* ---------------------------------------------------------------- particles */
 
 function emit(kind: PKind, x: number, y: number, vx: number, vy: number, size: number, life: number): void {
-  if (S.particles.length > 220) return;
-  S.particles.push({
-    kind,
-    x,
-    y,
-    vx,
-    vy,
-    life: 0,
-    max: life,
-    size,
-    rot: Math.random() * Math.PI * 2,
-  });
+  if (S.particles.length > 260) return;
+  S.particles.push({ kind, x, y, vx, vy, life: 0, max: life, size, rot: Math.random() * Math.PI * 2 });
 }
 
 function burst(kind: PKind, x: number, y: number, n: number, spread: number, size: number): void {
@@ -132,65 +140,169 @@ function burst(kind: PKind, x: number, y: number, n: number, spread: number, siz
   }
 }
 
-/* --------------------------------------------------------------- step copy */
-
-function hintFor(s: GameState): string {
-  switch (s.step) {
-    case "GET_STEAK":
-      return s.fridgeOpen ? "Tap the steak!" : "Tap the fridge to open it!";
-    case "GET_LOBSTER":
-      return "Now grab the lobster!";
-    case "LIGHT_GRILL":
-      return "Tap the grill to light the charcoal!";
-    case "COOK_STEAK":
-      if (s.steak.place === "slot") return "Put the steak on the grill!";
-      if (s.awaitingFlip) return "Tap the steak to flip it!";
-      return "Sizzling… let it cook.";
-    case "COOK_LOBSTER":
-      if (s.lobster.place === "slot") return "Drop the lobster in the pot!";
-      return "Bubbling away… almost red!";
-    case "TAKE_STEAK":
-      return "Take the steak off the grill!";
-    case "TAKE_LOBSTER":
-      return "Scoop the lobster out!";
-    case "SERVE":
-      return "Serve it to the family!";
-    case "CELEBRATE":
-      return "Yum yum yum!";
-  }
-}
-
-function ringFor(s: GameState): Rect | null {
-  if (s.busy > 0) return null;
-  switch (s.step) {
-    case "GET_STEAK":
-      return s.fridgeOpen ? HIT.fridgeSteak : HIT.fridge;
-    case "GET_LOBSTER":
-      return HIT.fridgeLobster;
-    case "LIGHT_GRILL":
-      return HIT.grill;
-    case "COOK_STEAK":
-      return s.steak.place === "slot" || s.awaitingFlip ? HIT.grill : null;
-    case "COOK_LOBSTER":
-      return s.lobster.place === "slot" ? HIT.pot : null;
-    case "TAKE_STEAK":
-      return HIT.grill;
-    case "TAKE_LOBSTER":
-      return HIT.pot;
-    case "SERVE":
-      return HIT.family;
-    default:
-      return null;
-  }
-}
-
-function nudge(text: string): void {
-  S.nudge = { text, t: 0 };
-  sfxNudge();
-}
-
 function toast(text: string): void {
   S.toast = { text, t: 0 };
+}
+
+/* ------------------------------------------------------------------- actions */
+
+function stationOf(kind: Kind): (Item | null)[] {
+  return kind === "steak" ? S.grill : S.pot;
+}
+
+/** Fridge tap — send one raw item to the next free slot of its station. */
+function addItem(kind: Kind): void {
+  const arr = stationOf(kind);
+  const d = kind === "steak" ? 0 : 1;
+  const i = arr.indexOf(null);
+  if (i < 0) {
+    S.doorFull[d] = 1;
+    sfxBonk();
+    return;
+  }
+  S.doorFlash[d] = 1;
+  const from = doorItem(d);
+  const it = newItem(kind, from.x, from.y, SCALE.born);
+  arr[i] = it;
+  sfxPickup();
+  const tx = slotX(i);
+  const ty = kind === "steak" ? GRILL_SLOT_Y : POT_SLOT_Y;
+  move(it, tx, ty, kind === "steak" ? SCALE.grill : SCALE.pot, 0.46, 300, 0, () => {
+    if (kind === "steak") {
+      sfxSizzle(1.4);
+      burst("puff", tx, ty - 10, 7, 60, 12);
+    } else {
+      sfxBubble();
+      burst("bubble", tx, ty - 20, 8, 60, 6);
+    }
+  });
+}
+
+function flip(it: Item): void {
+  it.awaitFlip = false;
+  it.flipped = true;
+  it.perfect = true;
+  sfxFlip();
+  burst("puff", it.x, it.y - 12, 10, 70, 12);
+  burst("ember", it.x, it.y, 8, 90, 4);
+  const { x, y, scale: s } = it;
+  move(it, x, y, s, 0.36, 54, Math.PI * 2, () => {});
+  toast("Perfect flip!");
+}
+
+/** Lift a finished item onto the shared serving tray. */
+function plate(arr: (Item | null)[], i: number): void {
+  const it = arr[i];
+  if (!it) return;
+  if (S.tray.length >= TRAY_CAP) {
+    S.trayShake = 1;
+    sfxBonk();
+    return;
+  }
+  const idx = S.tray.length;
+  arr[i] = null;
+  S.tray.push(it);
+  it.glow = 0;
+  sfxPickup();
+  move(it, trayX(idx), TRAY_Y, it.kind === "steak" ? SCALE.traySteak : SCALE.trayLobster, 0.42, 210, 0, () => {
+    sfxThunk();
+  });
+}
+
+function relayoutTray(): void {
+  S.tray.forEach((it, i) => {
+    const tx = trayX(i);
+    if (Math.abs(it.x - tx) < 1 && !it.tween) return;
+    move(it, tx, TRAY_Y, it.scale, 0.24, 26, 0, () => {});
+  });
+}
+
+function tapSlot(arr: (Item | null)[], i: number): void {
+  const it = arr[i];
+  if (!it || it.tween) return;
+  if (it.awaitFlip) {
+    flip(it);
+    return;
+  }
+  if (it.cook >= 1) plate(arr, i);
+}
+
+/** Only unlocked when the tray is full — a deadlock valve, never an accident. */
+function discard(i: number): void {
+  const it = S.tray[i];
+  if (!it) return;
+  S.tray.splice(i, 1);
+  burst("puff", it.x, it.y, 8, 70, 11);
+  sfxThunk();
+  relayoutTray();
+}
+
+function deliver(): void {
+  const o = S.order;
+  const steaks = S.tray.filter((i) => i.kind === "steak");
+  const lobsters = S.tray.filter((i) => i.kind === "lobster");
+  if (steaks.length < o.steak || lobsters.length < o.lobster) {
+    S.shake = 1;
+    sfxNudge();
+    toast("Still hungry!");
+    return;
+  }
+
+  // Spend perfectly-flipped steaks first so the player always banks the bonus.
+  steaks.sort((a, b) => Number(b.perfect) - Number(a.perfect));
+  const used = steaks.slice(0, o.steak).concat(lobsters.slice(0, o.lobster));
+  const perfects = used.filter((i) => i.kind === "steak" && i.perfect).length;
+  const secs = Math.max(0, Math.floor(o.left));
+  const gained = 10 * (o.steak + o.lobster) + 2 * perfects + secs;
+
+  S.tray = S.tray.filter((i) => !used.includes(i));
+  relayoutTray();
+
+  used.forEach((it, k) => {
+    S.flying.push(it);
+    const px = TABLE.x + 74 + (k % 3) * 110;
+    move(it, px, TABLE.y + 10, SCALE.plate, 0.5 + k * 0.05, 260, 0, () => {
+      sfxSparkle();
+      burst("sparkle", it.x, it.y, 8, 110, 9);
+      const at = S.flying.indexOf(it);
+      if (at >= 0) S.flying.splice(at, 1);
+    });
+  });
+
+  S.score += gained;
+  S.served++;
+  S.cheer = 1;
+  S.lilyBob = 10;
+  if (S.score > S.best) {
+    S.best = S.score;
+    S.newBest = true;
+    saveBest(S.best);
+  }
+  sfxWhoosh();
+  sfxCheer();
+  toast(`+${gained}!`);
+  for (let i = 0; i < 12; i++) {
+    emit("heart", 240 + Math.random() * 240, 460 + Math.random() * 40, (Math.random() - 0.5) * 50, -80 - Math.random() * 60, 11 + Math.random() * 8, 2);
+  }
+  burst("sparkle", 360, 470, 24, 200, 11);
+
+  S.order = makeOrder(o.n + 1);
+}
+
+function gameOver(): void {
+  S.phase = "over";
+  S.overShake = 1;
+  S.popup = -0.55;
+  S.shake = 1;
+  sfxAww();
+}
+
+function restart(): void {
+  const best = S.best;
+  S = newState(S.t, best);
+  S.phase = "play";
+  S.popup = 0;
+  sfxThunk();
 }
 
 /* -------------------------------------------------------------------- input */
@@ -198,275 +310,186 @@ function toast(text: string): void {
 function tap(x: number, y: number): void {
   unlockAudio();
 
+  if (S.phase === "start" || S.phase === "over") {
+    if (S.popup > 0.6 && hit(POPUP_BTN, x, y)) {
+      if (S.phase === "over") restart();
+      else if (tipsSeen()) S.phase = "play";
+      else {
+        S.phase = "tips";
+        S.tip = 0;
+      }
+      sfxThunk();
+    }
+    return;
+  }
+
+  if (S.phase === "tips") {
+    S.tip++;
+    sfxPickup();
+    if (S.tip >= TIP_COUNT) {
+      markTipsSeen();
+      S.phase = "play";
+    }
+    return;
+  }
+
   if (hit(MUTE_BTN, x, y)) {
     setMuted(!isMuted());
     return;
   }
 
-  if (S.step === "CELEBRATE") {
-    if (S.popup > 0.6 && hit(POPUP_BTN, x, y)) restart();
+  if (hit(HIT.family, x, y)) {
+    deliver();
     return;
   }
 
-  if (S.busy > 0) return;
-
-  switch (S.step) {
-    case "GET_STEAK": {
-      if (!S.fridgeOpen) {
-        if (hit(HIT.fridge, x, y)) {
-          S.fridgeOpen = true;
-          sfxThunk();
-        } else nudge("Open the fridge first!");
-        return;
-      }
-      if (hit(HIT.fridgeSteak, x, y)) {
-        pickFromFridge(S.steak, P.slotA.x, P.slotA.y, "GET_LOBSTER");
-      } else if (hit(HIT.fridgeLobster, x, y)) {
-        nudge("Steak first, then the lobster!");
-      } else nudge("Tap the steak in the fridge!");
+  for (let i = 0; i < SLOTS; i++) {
+    if (hit(grillHit(i), x, y)) {
+      tapSlot(S.grill, i);
       return;
     }
-    case "GET_LOBSTER": {
-      if (hit(HIT.fridgeLobster, x, y)) {
-        pickFromFridge(S.lobster, P.slotB.x, P.slotB.y, "LIGHT_GRILL");
-      } else nudge("Grab the lobster next!");
-      return;
-    }
-    case "LIGHT_GRILL": {
-      if (hit(HIT.grill, x, y)) {
-        S.grillLit = true;
-        S.busy = 1.5;
-        sfxWhoosh();
-        burst("ember", GRILL.x + GRILL.w / 2, 500, 26, 130, 5);
-        burst("puff", GRILL.x + GRILL.w / 2, 486, 10, 90, 16);
-        S.step = "COOK_STEAK";
-        toast("Whoosh!");
-      } else nudge("Light the grill!");
-      return;
-    }
-    case "COOK_STEAK": {
-      if (S.steak.place === "slot") {
-        if (hit(HIT.grill, x, y)) {
-          S.steak.place = "station";
-          move(S.steak, P.steakGrill.x, P.steakGrill.y, 0.95, 0.5, 170, 0, () => {
-            sfxSizzle(2);
-            burst("puff", P.steakGrill.x, P.steakGrill.y - 10, 8, 60, 13);
-          });
-        } else nudge("Pop the steak on the grill!");
-        return;
-      }
-      if (S.awaitingFlip) {
-        if (hit(HIT.grill, x, y)) flipSteak();
-        else nudge("Tap the grill to flip!");
-        return;
-      }
-      nudge("It's still cooking!");
-      return;
-    }
-    case "COOK_LOBSTER": {
-      if (S.lobster.place === "slot") {
-        if (hit(HIT.pot, x, y)) {
-          S.lobster.place = "station";
-          move(S.lobster, P.lobsterPot.x, P.lobsterPot.y, 0.72, 0.5, 150, 0, () => {
-            sfxBubble();
-            burst("bubble", P.lobsterPot.x, POT.y + 20, 10, 60, 7);
-          });
-        } else nudge("Into the pot with the lobster!");
-        return;
-      }
-      nudge("Let it boil a moment!");
-      return;
-    }
-    case "TAKE_STEAK": {
-      if (hit(HIT.grill, x, y)) {
-        S.steak.place = "slot";
-        sfxPickup();
-        move(S.steak, P.slotA.x, P.slotA.y, 0.62, 0.55, 190, 0, () => {
-          S.step = "TAKE_LOBSTER";
-        });
-      } else nudge("Take the steak off the grill!");
-      return;
-    }
-    case "TAKE_LOBSTER": {
-      if (hit(HIT.pot, x, y)) {
-        S.lobster.place = "slot";
-        sfxPickup();
-        move(S.lobster, P.slotB.x, P.slotB.y, 0.62, 0.55, 190, 0, () => {
-          S.step = "SERVE";
-        });
-      } else nudge("Scoop the lobster out of the pot!");
-      return;
-    }
-    case "SERVE": {
-      if (hit(HIT.family, x, y)) serve();
-      else nudge("Bring it to the table!");
+    if (hit(potHit(i), x, y)) {
+      tapSlot(S.pot, i);
       return;
     }
   }
-}
 
-function pickFromFridge(it: Item, tx: number, ty: number, next: GameState["step"]): void {
-  sfxPickup();
-  it.place = "slot";
-  move(it, tx, ty, 0.62, 0.6, 210, 0, () => {
-    S.step = next;
-    if (next === "LIGHT_GRILL") {
-      S.fridgeOpen = false;
-      sfxThunk();
+  if (hit(doorHit(0), x, y)) {
+    addItem("steak");
+    return;
+  }
+  if (hit(doorHit(1), x, y)) {
+    addItem("lobster");
+    return;
+  }
+
+  if (S.tray.length >= TRAY_CAP) {
+    for (let i = 0; i < S.tray.length; i++) {
+      if (hit(trayHit(i), x, y)) {
+        discard(i);
+        return;
+      }
     }
-  });
-}
-
-function flipSteak(): void {
-  const st = S.steak;
-  S.awaitingFlip = false;
-  S.flipBonus = Math.round(200 * clamp01(1 - (S.flipWaitT - 0.5) / 3.2));
-  sfxFlip();
-  burst("puff", st.x, st.y - 12, 12, 70, 14);
-  burst("ember", st.x, st.y, 10, 90, 4);
-  move(st, st.x, st.y, st.scale, 0.42, 68, Math.PI * 2, () => {
-    st.flipped = true;
-  });
-  toast(S.flipBonus > 140 ? "Nice flip!" : "Flipped!");
-}
-
-function serve(): void {
-  S.busy = 2.2;
-  S.steak.place = "table";
-  S.lobster.place = "table";
-  sfxPickup();
-  move(S.steak, P.steakTable.x, P.steakTable.y, 0.58, 0.6, 230, 0, () => {
-    sfxSparkle();
-  });
-  move(S.lobster, P.lobsterTable.x, P.lobsterTable.y, 0.58, 0.78, 250, 0, () => {
-    finishRound();
-  });
-}
-
-function finishRound(): void {
-  const speed = Math.round(200 * clamp01(1 - (S.roundT - 45) / 105));
-  S.score = Math.round((600 + S.flipBonus + speed) / 10) * 10;
-  S.step = "CELEBRATE";
-  sfxCheer();
-  for (let i = 0; i < 14; i++) {
-    emit("heart", 380 + Math.random() * 240, 1000 + Math.random() * 60, (Math.random() - 0.5) * 40, -70 - Math.random() * 60, 14 + Math.random() * 12, 2.2);
   }
-  burst("sparkle", 500, 1030, 26, 190, 12);
-  if (S.score > S.best) {
-    S.best = S.score;
-    saveBest(S.best);
-  }
-}
-
-function restart(): void {
-  const best = S.best;
-  const t = S.t;
-  S = newState(t, best);
-  sfxThunk();
+  // anything else is a harmless no-op
 }
 
 /* ------------------------------------------------------------------- update */
 
-let sizzleAcc = 0;
-let bubbleAcc = 0;
+const sizzleAcc = [0, 0, 0, 0];
+const bubbleAcc = [0, 0, 0, 0];
 let emberAcc = 0;
-let sparkleAcc = 0;
+
+function cookStation(arr: (Item | null)[], dt: number, kind: Kind): void {
+  const seconds = kind === "steak" ? STEAK_COOK_SECONDS : LOBSTER_COOK_SECONDS;
+  let cooking = 0;
+  for (const it of arr) if (it && !it.tween && it.cook < 1) cooking++;
+  const vol = cooking > 0 ? 1 / Math.sqrt(cooking) : 1;
+
+  for (let i = 0; i < arr.length; i++) {
+    const it = arr[i];
+    if (!it || it.tween) continue;
+
+    if (it.cook < 1) {
+      const was = it.cook;
+      it.cook = Math.min(1, it.cook + dt / seconds);
+
+      if (kind === "steak" && !it.flipped) {
+        if (was < FLIP_FROM && it.cook >= FLIP_FROM) {
+          it.awaitFlip = true;
+          sfxDing();
+        }
+        if (it.cook >= FLIP_TO && it.awaitFlip) {
+          // Missed the window — it still cooks, it's just well-done.
+          it.awaitFlip = false;
+          it.flipped = true;
+          it.perfect = false;
+          burst("puff", it.x, it.y - 10, 6, 50, 10);
+        }
+      }
+
+      if (it.cook >= 1) {
+        it.pop = 1;
+        sfxDing();
+        burst("sparkle", it.x, it.y, 10, 110, 9);
+        S.lilyBob = 6;
+      }
+
+      if (kind === "steak") {
+        sizzleAcc[i] += dt;
+        // staggered per slot so four grills crackle instead of pulsing in lockstep
+        if (sizzleAcc[i] > 0.26 + i * 0.04) {
+          sizzleAcc[i] = 0;
+          sfxSizzle(vol);
+          emit("puff", it.x + (Math.random() - 0.5) * 60, it.y - 6, (Math.random() - 0.5) * 16, -46 - Math.random() * 26, 7 + Math.random() * 6, 1.2);
+        }
+      } else {
+        bubbleAcc[i] += dt;
+        if (bubbleAcc[i] > 0.2) {
+          bubbleAcc[i] = 0;
+          if (Math.random() < 0.3) sfxBubble();
+          emit("bubble", it.x + (Math.random() - 0.5) * 70, it.y - 8, (Math.random() - 0.5) * 10, -34 - Math.random() * 22, 4 + Math.random() * 5, 0.85);
+          if (Math.random() < 0.35) {
+            emit("steam", it.x + (Math.random() - 0.5) * 60, it.y - 26, (Math.random() - 0.5) * 14, -40 - Math.random() * 22, 8 + Math.random() * 6, 1.4);
+          }
+        }
+      }
+    } else {
+      it.glow = 0.55 + 0.45 * Math.abs(Math.sin(S.t * 4 + i));
+    }
+  }
+}
 
 function update(dt: number): void {
   S.t += dt;
-  if (S.step !== "CELEBRATE") S.roundT += dt;
-  S.busy = Math.max(0, S.busy - dt);
-  if (S.steak.tween || S.lobster.tween) S.busy = Math.max(S.busy, 0.001);
 
-  S.fridge += ((S.fridgeOpen ? 1 : 0) - S.fridge) * Math.min(1, dt * 7);
-  S.ignite += ((S.grillLit ? 1 : 0) - S.ignite) * Math.min(1, dt * 1.6);
-  const wantBoil = S.lobster.place === "station" || S.step === "TAKE_LOBSTER" ? 1 : 0;
-  S.potBoil += (wantBoil - S.potBoil) * Math.min(1, dt * 2);
+  const live = S.phase === "play";
+  const wantPopup = S.phase === "start" || S.phase === "over";
+  S.popup = wantPopup ? Math.min(1, S.popup + dt * 1.8) : Math.max(0, S.popup - dt * 3.4);
 
-  stepTween(S.steak, dt);
-  stepTween(S.lobster, dt);
-  S.steak.pop = Math.max(0, S.steak.pop - dt * 3);
-  S.lobster.pop = Math.max(0, S.lobster.pop - dt * 3);
+  S.ignite += ((S.phase === "over" ? 0.35 : 1) - S.ignite) * Math.min(1, dt * 1.6);
+  S.potBoil += (1 - S.potBoil) * Math.min(1, dt * 2);
+  S.shake = Math.max(0, S.shake - dt * 2.6);
+  S.overShake = Math.max(0, S.overShake - dt * 1.6);
+  S.trayShake = Math.max(0, S.trayShake - dt * 3);
+  S.cheer = Math.max(0, S.cheer - dt * 0.55);
   S.lilyBob = Math.max(0, S.lilyBob - dt * 20);
+  S.doorFlash[0] = Math.max(0, S.doorFlash[0] - dt * 4);
+  S.doorFlash[1] = Math.max(0, S.doorFlash[1] - dt * 4);
+  S.doorFull[0] = Math.max(0, S.doorFull[0] - dt * 2.4);
+  S.doorFull[1] = Math.max(0, S.doorFull[1] - dt * 2.4);
+  S.happy += (clamp01(S.served / 10) - S.happy) * Math.min(1, dt * 3);
 
-  // steak cooking
-  if (S.step === "COOK_STEAK" && S.steak.place === "station" && !S.steak.tween) {
-    if (S.awaitingFlip) {
-      S.flipWaitT += dt;
-    } else if (S.steak.cook < 1) {
-      S.steak.cook = Math.min(1, S.steak.cook + dt / STEAK_COOK_SECONDS);
-      if (!S.steak.flipped && S.steak.cook >= 0.5) {
-        S.steak.cook = 0.5;
-        S.awaitingFlip = true;
-        S.flipWaitT = 0;
-        sfxDing();
-      }
-      if (S.steak.cook >= 1) {
-        S.steak.cook = 1;
-        S.step = "COOK_LOBSTER";
-        sfxDing();
-        toast("Steak's ready!");
-        burst("sparkle", S.steak.x, S.steak.y, 12, 110, 10);
-        S.lilyBob = 8;
-      }
-    }
-    sizzleAcc += dt;
-    const rate = S.awaitingFlip ? 0.34 : 0.16;
-    if (sizzleAcc > rate) {
-      sizzleAcc = 0;
-      sfxSizzle(S.awaitingFlip ? 0.5 : 1);
-      emit("puff", S.steak.x + (Math.random() - 0.5) * 70, S.steak.y - 6, (Math.random() - 0.5) * 16, -46 - Math.random() * 30, 8 + Math.random() * 7, 1.3);
+  for (const arr of [S.grill, S.pot]) {
+    for (const it of arr) if (it) stepTween(it, dt);
+  }
+  for (const it of S.tray) stepTween(it, dt);
+  for (let i = S.flying.length - 1; i >= 0; i--) stepTween(S.flying[i], dt);
+
+  for (const arr of [S.grill, S.pot, S.tray, S.flying]) {
+    for (const it of arr) if (it) it.pop = Math.max(0, it.pop - dt * 3);
+  }
+
+  if (live) {
+    cookStation(S.grill, dt, "steak");
+    cookStation(S.pot, dt, "lobster");
+    S.order.left -= dt;
+    if (S.order.left <= 0) {
+      S.order.left = 0;
+      gameOver();
     }
   }
 
-  // lobster boiling
-  if (S.lobster.place === "station" && !S.lobster.tween) {
-    if (S.step === "COOK_LOBSTER" && S.lobster.cook < 1) {
-      S.lobster.cook = Math.min(1, S.lobster.cook + dt / LOBSTER_COOK_SECONDS);
-      if (S.lobster.cook >= 1) {
-        S.step = "TAKE_STEAK";
-        sfxDing();
-        toast("Lobster's ready!");
-        burst("sparkle", S.lobster.x, S.lobster.y - 30, 12, 110, 10);
-        S.lilyBob = 8;
-      }
-    }
-    bubbleAcc += dt;
-    if (bubbleAcc > 0.13) {
-      bubbleAcc = 0;
-      if (Math.random() < 0.45) sfxBubble();
-      emit("bubble", POT.x + 24 + Math.random() * (POT.w - 48), POT.y + 16, (Math.random() - 0.5) * 10, -34 - Math.random() * 26, 4 + Math.random() * 6, 0.9);
-      if (Math.random() < 0.4) {
-        emit("steam", POT.x + 30 + Math.random() * (POT.w - 60), POT.y, (Math.random() - 0.5) * 14, -40 - Math.random() * 24, 9 + Math.random() * 7, 1.5);
-      }
-    }
+  // embers keep rising from the coals — the grill is always hot in arcade mode
+  emberAcc += dt;
+  if (emberAcc > 0.06) {
+    emberAcc = 0;
+    emit("ember", GRILL.x + 20 + Math.random() * (GRILL.w - 40), 640, (Math.random() - 0.5) * 26, -90 - Math.random() * 80, 2.5 + Math.random() * 3.5, 1 + Math.random() * 0.8);
+  }
+  if (Math.random() < dt * 6) {
+    emit("steam", POT.x + 60 + Math.random() * (POT.w - 120), POT.y + 20, (Math.random() - 0.5) * 14, -34 - Math.random() * 20, 7 + Math.random() * 6, 1.4);
   }
 
-  // embers rise from the coals whenever the grill is hot
-  if (S.ignite > 0.15) {
-    emberAcc += dt;
-    if (emberAcc > 0.07) {
-      emberAcc = 0;
-      emit("ember", GRILL.x + 20 + Math.random() * (GRILL.w - 40), 494, (Math.random() - 0.5) * 26, -90 - Math.random() * 80, 2.5 + Math.random() * 3.5, 1.1 + Math.random() * 0.8);
-    }
-  }
-
-  // celebration
-  if (S.step === "CELEBRATE") {
-    S.celebrate = Math.min(1, S.celebrate + dt * 2.2);
-    S.popup = Math.min(1, S.popup + (S.celebrate >= 1 ? dt * 1.5 : 0));
-    sparkleAcc += dt;
-    if (sparkleAcc > 0.12 && S.popup < 0.9) {
-      sparkleAcc = 0;
-      sfxSparkle();
-      emit("sparkle", 350 + Math.random() * 340, 950 + Math.random() * 140, (Math.random() - 0.5) * 50, -40 - Math.random() * 40, 8 + Math.random() * 8, 1.4);
-      if (Math.random() < 0.5) {
-        emit("heart", 370 + Math.random() * 280, 990, (Math.random() - 0.5) * 34, -70, 12 + Math.random() * 10, 2);
-      }
-    }
-  }
-
-  // particles
   for (let i = S.particles.length - 1; i >= 0; i--) {
     const p = S.particles[i];
     p.life += dt;
@@ -489,16 +512,10 @@ function update(dt: number): void {
     }
   }
 
-  if (S.nudge) {
-    S.nudge.t += dt;
-    if (S.nudge.t > 2) S.nudge = null;
-  }
   if (S.toast) {
     S.toast.t += dt;
-    if (S.toast.t > 1.1) S.toast = null;
+    if (S.toast.t > 1.2) S.toast = null;
   }
-
-  S.ring = ringFor(S);
 }
 
 /* --------------------------------------------------------------------- loop */
@@ -511,7 +528,7 @@ function draw(): void {
   c.fillStyle = "#2a150d";
   c.fillRect(0, 0, canvas.width, canvas.height);
   c.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * offX, dpr * offY);
-  render(c, S, hintFor(S), isMuted());
+  render(c, S, isMuted());
 
   if (!booted) {
     booted = true;
@@ -531,7 +548,7 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 
-/* ------------------------------------------------------------------- wiring */
+/* ------------------------------------------------------------------ wiring */
 
 function toDesign(clientX: number, clientY: number): { x: number; y: number } {
   const r = canvas.getBoundingClientRect();

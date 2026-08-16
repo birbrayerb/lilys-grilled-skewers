@@ -138,3 +138,17 @@ export function sfxNudge(): void {
 export function sfxSparkle(): void {
   tone(1400 + Math.random() * 900, 0.22, "sine", 0.08);
 }
+
+/** Soft "that station is full" bonk — a closed door, not a buzzer. */
+export function sfxBonk(): void {
+  tone(190, 0.13, "sine", 0.2, 0, 120);
+  noise(0.08, 0.07, 320, 1.4);
+}
+
+/** Sad little "aww" when the family gives up waiting. */
+export function sfxAww(): void {
+  tone(392, 0.34, "triangle", 0.2, 0, 370);
+  tone(311, 0.4, "triangle", 0.18, 0.16, 294);
+  tone(233, 0.75, "sine", 0.18, 0.34, 175);
+  noise(0.7, 0.08, 900, 0.8, 0.34, 200);
+}
