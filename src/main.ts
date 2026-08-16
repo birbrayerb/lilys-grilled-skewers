@@ -291,6 +291,7 @@ function deliver(): void {
 
 function gameOver(): void {
   S.phase = "over";
+  S.popupKind = "over";
   S.overShake = 1;
   S.popup = -0.55;
   S.shake = 1;

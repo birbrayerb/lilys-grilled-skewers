@@ -1626,7 +1626,7 @@ function wrapText(
 
 function drawPopup(c: Ctx, S: GameState): void {
   if (S.popup <= 0.001) return;
-  const start = S.phase === "start";
+  const start = S.popupKind === "start";
   const k = easeOut(clamp01(S.popup));
   c.save();
   c.globalAlpha = k * 0.76;

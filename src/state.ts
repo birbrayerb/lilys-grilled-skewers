@@ -96,6 +96,8 @@ export type GameState = {
   potBoil: number;
   lilyBob: number;
   popup: number;
+  /** Latched when the popup is raised — the phase moves on while it is still fading out. */
+  popupKind: "start" | "over";
 };
 
 export function newItem(kind: Kind, x: number, y: number, scale: number): Item {
@@ -191,5 +193,6 @@ export function newState(t: number, best: number): GameState {
     potBoil: 0,
     lilyBob: 0,
     popup: 1,
+    popupKind: "start",
   };
 }
